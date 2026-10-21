@@ -4,14 +4,20 @@
 Usage: distinct_count.py <input.bin> <output.bin>
 """
 
-from __future__ import annotations
-
 import struct
 import sys
 from pathlib import Path
 
 
 def main(arguments: list[str]) -> int:
+    """Count the distinct values of the input file and write the count.
+
+    Args:
+        arguments: The command line, starting with the script name.
+
+    Returns:
+        The exit status: 0 on success, 2 for a wrong number of arguments.
+    """
     if len(arguments) < 3:
         print("usage: distinct_count.py <input.bin> <output.bin>", file=sys.stderr)
         return 2

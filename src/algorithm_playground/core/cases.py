@@ -24,8 +24,6 @@ fit, they raise :class:`~algorithm_playground.core.hooks.HookError`, which names
 the hook, instead of the original exception.
 """
 
-from __future__ import annotations
-
 import random
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -34,9 +32,42 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from algorithm_playground.core.hooks import call_hook
 
 if TYPE_CHECKING:
-    from algorithm_playground.core.problem import Problem
+    # problem.py imports this module, so the import is for annotations only.
+    from algorithm_playground.core.problem import AnyProblem
+
+__all__ = [
+    "DEFAULT_MAXIMUM_SIZE",
+    "DEFAULT_RANDOM_CASE_COUNT",
+    "FIXTURE_PREFIX",
+    "GENERATED_PREFIX",
+    "SHRUNK_PREFIX",
+    "AnyCase",
+    "AnyFixture",
+    "AnyInputGenerator",
+    "Case",
+    "CaseError",
+    "CaseOrigin",
+    "CasePlan",
+    "Fixture",
+    "FixtureOrigin",
+    "GeneratedOrigin",
+    "InputGenerator",
+    "InputT",
+    "ShrunkOrigin",
+    "build_cases",
+    "check_sizes",
+    "default_generator",
+    "generate_case",
+    "parse_case_identifier",
+    "problem_fixtures",
+    "problem_generators",
+    "resolve_case",
+    "select_generators",
+    "startup_case",
+]
 
 InputT = TypeVar("InputT")
+ItemT = TypeVar("ItemT")
 
 FIXTURE_PREFIX = "fixture:"
 GENERATED_PREFIX = "generated:"
@@ -46,13 +77,84 @@ DEFAULT_RANDOM_CASE_COUNT = 20
 DEFAULT_MAXIMUM_SIZE = 100
 
 
+def _checked_list(items: Iterable[object], expected: type[ItemT]) -> list[ItemT]:
+    """Collect ``items``, requiring each to be an instance of ``expected``."""
+    collected: list[ItemT] = []
+    for item in items:
+        if not isinstance(item, expected):
+            raise TypeError(
+                f"it returned a {type(item).__name__} where a {expected.__name__} belongs"
+            )
+        collected.append(item)
+    return collected
+
+
+def _to_integer(text: str) -> int | None:
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _labeled_integer(identifier: str, part: str, label: str) -> int:
+    """Parse ``label=N`` where ``N`` is written the way identifiers write it (``5``, not ``05``)."""
+    prefix = f"{label}="
+    if part.startswith(prefix):
+        digits = part.removeprefix(prefix)
+        value = _to_integer(digits)
+        if value is not None and str(value) == digits:
+            return value
+    raise CaseError(
+        f"Case identifier {identifier!r} has no valid '{label}=N' part: N must be a plain "
+        "integer, without a plus sign, leading zeros, underscores, or spaces"
+    )
+
+
+def _parse_generated_identifier(text: str) -> "GeneratedOrigin | None":
+    """Parse ``generated:NAME:size=N:seed=N``; return ``None`` if the shape does not match."""
+    parts = text.removeprefix(GENERATED_PREFIX).rsplit(":", 2)
+    if len(parts) != 3 or not parts[0]:
+        return None
+    generator_name, size_part, seed_part = parts
+    size = _labeled_integer(text, size_part, "size")
+    if size < 0:
+        raise CaseError(f"Case identifier {text!r} has a negative size")
+    return GeneratedOrigin(generator_name, _labeled_integer(text, seed_part, "seed"), size)
+
+
+def _fixture_cases(problem: "AnyProblem") -> list["AnyCase"]:
+    return [
+        Case(FixtureOrigin(fixture.name, fixture.description), fixture.input_data)
+        for fixture in problem_fixtures(problem)
+    ]
+
+
+def _random_case(
+    plan: "CasePlan", index: int, *, minimum_size: int, generators: Sequence["AnyInputGenerator"]
+) -> "AnyCase":
+    """Build the generated case at position ``index`` of ``plan``."""
+    random_generator = random.Random(f"algorithm-playground:{plan.seed}:{index}")
+    seed = random_generator.randrange(2**32)
+    position = (index + random_generator.random()) / plan.random_case_count
+    span = plan.maximum_size - minimum_size
+    size = min(plan.maximum_size, minimum_size + int(span * position**2))
+    generator = generators[(index + index // len(generators)) % len(generators)]
+    return generate_case(generator, size=size, seed=seed)
+
+
 class CaseError(ValueError):
     """Raised when a case identifier or a case plan cannot be turned into cases."""
 
 
 @dataclass(frozen=True)
 class Fixture(Generic[InputT]):
-    """A named, hand-written input; the description says why the input is interesting."""
+    """A named, hand-written input.
+
+    Args:
+        name: The name that identifies the fixture in case identifiers.
+        input_data: The input.
+        description: Why the input is interesting.
+    """
 
     name: str
     input_data: InputT
@@ -63,11 +165,17 @@ class Fixture(Generic[InputT]):
 class InputGenerator(Generic[InputT]):
     """A named function that builds an input of a given size from a seeded random generator.
 
-    ``generate(random_generator, size)`` must return the same input whenever it
-    receives a generator in the same state, must accept every size from the
-    problem's ``minimum_size`` up, and must take all of its randomness from
-    ``random_generator``. The name appears in case identifiers, so it must not
-    contain a colon or whitespace. Users know a generator as a *distribution*.
+    Users know a generator as a *distribution*.
+
+    Args:
+        name: The name that identifies the generator in case identifiers. It
+            must not contain a colon or whitespace.
+        description: What kind of input the generator builds.
+        generate: ``generate(random_generator, size)`` returns an input. It
+            must return the same input whenever it receives a generator in the
+            same state, must accept every size from the problem's
+            ``minimum_size`` up, and must take all of its randomness from
+            ``random_generator``.
     """
 
     name: str
@@ -88,6 +196,7 @@ class FixtureOrigin:
 
     @property
     def identifier(self) -> str:
+        """The stable text that names the case."""
         return f"{FIXTURE_PREFIX}{self.name}"
 
 
@@ -101,6 +210,7 @@ class GeneratedOrigin:
 
     @property
     def identifier(self) -> str:
+        """The stable text that names the case."""
         return f"{GENERATED_PREFIX}{self.generator_name}:size={self.size}:seed={self.seed}"
 
 
@@ -112,6 +222,7 @@ class ShrunkOrigin:
 
     @property
     def identifier(self) -> str:
+        """The stable text that names the case."""
         return f"{SHRUNK_PREFIX}{self.source_identifier}"
 
 
@@ -131,15 +242,31 @@ class Case(Generic[InputT]):
         return self.origin.identifier
 
 
+# Aliases for values whose input type is not known where they are handled: the engines work
+# with problems of every input type.
+AnyFixture = Fixture[Any]
+AnyInputGenerator = InputGenerator[Any]
+AnyCase = Case[Any]
+
+
 @dataclass(frozen=True)
 class CasePlan:
     """Which cases a test run uses.
 
-    ``random_case_count`` generated cases are spread over the generators named
-    in ``generator_names`` (all of the problem's generators when empty), with
-    sizes from the problem's ``minimum_size`` up to ``maximum_size``. The
-    generators take turns, shifted by one every round, so that each of them
-    covers the whole range of sizes.
+    The generated cases are spread over the generators in turn, shifted by one
+    every round, so that each of them covers the whole range of sizes.
+
+    Args:
+        include_fixtures: Whether the problem's fixtures are part of the run.
+        random_case_count: The number of generated cases.
+        maximum_size: The largest size of a generated case. Sizes start at the
+            problem's ``minimum_size``.
+        generator_names: The generators to use. Empty means all of the
+            problem's generators.
+        seed: The seed from which the seeds of the generated cases derive.
+
+    Raises:
+        CaseError: If ``random_case_count`` or ``maximum_size`` is negative.
     """
 
     include_fixtures: bool = True
@@ -157,18 +284,49 @@ class CasePlan:
             raise CaseError(f"The maximum size must not be negative, got {self.maximum_size}")
 
 
-def default_generator(problem: Problem[Any, Any, Any]) -> InputGenerator[Any]:
-    """Return the problem's default generator: the first one it lists."""
+def default_generator(problem: "AnyProblem") -> AnyInputGenerator:
+    """Return the problem's default generator: the first one it lists.
+
+    Args:
+        problem: The problem.
+
+    Returns:
+        The generator.
+
+    Raises:
+        CaseError: If the problem defines no generator.
+        HookError: If the ``generators`` hook fails.
+    """
     return select_generators(problem, ())[0]
 
 
-def startup_case(problem: Problem[Any, Any, Any], seed: int) -> Case[Any]:
-    """Return the smallest input of the default generator: the input startup time is measured on."""
+def startup_case(problem: "AnyProblem", seed: int) -> AnyCase:
+    """Build the smallest input of the default generator: the input startup time is measured on.
+
+    Args:
+        problem: The problem.
+        seed: The seed for the generator.
+
+    Returns:
+        The case, at the problem's ``minimum_size``.
+
+    Raises:
+        CaseError: If the problem defines no generator.
+        HookError: If a hook fails.
+    """
     return generate_case(default_generator(problem), size=problem.minimum_size, seed=seed)
 
 
-def check_sizes(problem: Problem[Any, Any, Any], sizes: Sequence[int]) -> None:
-    """Raise :class:`CaseError` for a size below the smallest the problem accepts."""
+def check_sizes(problem: "AnyProblem", sizes: Sequence[int]) -> None:
+    """Require every size to be one the problem accepts.
+
+    Args:
+        problem: The problem.
+        sizes: The sizes to check.
+
+    Raises:
+        CaseError: If a size is below the problem's ``minimum_size``.
+    """
     too_small = sorted(size for size in sizes if size < problem.minimum_size)
     if too_small:
         listing = ", ".join(str(size) for size in too_small)
@@ -179,7 +337,20 @@ def check_sizes(problem: Problem[Any, Any, Any], sizes: Sequence[int]) -> None:
 
 
 def generate_case(generator: InputGenerator[InputT], *, size: int, seed: int) -> Case[InputT]:
-    """Run ``generator`` for ``size`` and ``seed`` and wrap the input as a case."""
+    """Run a generator and wrap the input as a case.
+
+    Args:
+        generator: The generator to run.
+        size: The size of the input.
+        seed: The seed of the random generator that the generator receives.
+
+    Returns:
+        The case, identified by the generator's name, the size and the seed.
+
+    Raises:
+        CaseError: If ``size`` is negative.
+        HookError: If the generator raises.
+    """
     if size < 0:
         raise CaseError(f"The size must not be negative, got {size}")
     input_data = call_hook(
@@ -188,8 +359,8 @@ def generate_case(generator: InputGenerator[InputT], *, size: int, seed: int) ->
     return Case(GeneratedOrigin(generator.name, seed, size), input_data)
 
 
-def build_cases(problem: Problem[Any, Any, Any], plan: CasePlan) -> tuple[Case[Any], ...]:
-    """Expand ``plan`` into cases: the fixtures first, then the generated cases.
+def build_cases(problem: "AnyProblem", plan: CasePlan) -> tuple[AnyCase, ...]:
+    """Expand a plan into cases: the fixtures first, then the generated cases.
 
     The result depends only on the problem and the plan. Each generated case
     gets its own seed, derived from the plan's seed and the case's position.
@@ -199,13 +370,21 @@ def build_cases(problem: Problem[Any, Any, Any], plan: CasePlan) -> tuple[Case[A
     generator of a position is ``(position + position // count) % count``, so
     every generator gets small and large sizes alike instead of one generator
     getting all the small ones.
+
+    Args:
+        problem: The problem.
+        plan: Which cases to build.
+
+    Returns:
+        The cases.
+
+    Raises:
+        CaseError: If the plan names an unknown generator, its maximum size is
+            below the problem's ``minimum_size``, or the problem defines no
+            generator.
+        HookError: If a hook fails.
     """
-    cases: list[Case[Any]] = []
-    if plan.include_fixtures:
-        cases.extend(
-            Case(FixtureOrigin(fixture.name, fixture.description), fixture.input_data)
-            for fixture in problem_fixtures(problem)
-        )
+    cases = _fixture_cases(problem) if plan.include_fixtures else []
     if plan.random_case_count == 0:
         return tuple(cases)
 
@@ -216,32 +395,35 @@ def build_cases(problem: Problem[Any, Any, Any], plan: CasePlan) -> tuple[Case[A
             f"problem '{problem.name}' accepts, {minimum_size}"
         )
     generators = select_generators(problem, plan.generator_names)
-    for index in range(plan.random_case_count):
-        random_generator = random.Random(f"algorithm-playground:{plan.seed}:{index}")
-        seed = random_generator.randrange(2**32)
-        position = (index + random_generator.random()) / plan.random_case_count
-        span = plan.maximum_size - minimum_size
-        size = min(plan.maximum_size, minimum_size + int(span * position**2))
-        generator = generators[(index + index // len(generators)) % len(generators)]
-        cases.append(generate_case(generator, size=size, seed=seed))
+    cases.extend(
+        _random_case(plan, index, minimum_size=minimum_size, generators=generators)
+        for index in range(plan.random_case_count)
+    )
     return tuple(cases)
 
 
 def parse_case_identifier(text: str) -> FixtureOrigin | GeneratedOrigin:
-    """Parse the identifier of a fixture or generated case; raise :class:`CaseError` otherwise."""
+    """Parse the identifier of a fixture or generated case.
+
+    Args:
+        text: ``fixture:NAME`` or ``generated:DISTRIBUTION:size=N:seed=N``.
+
+    Returns:
+        Where the case comes from.
+
+    Raises:
+        CaseError: If ``text`` is malformed, or names a shrunk case, which
+            cannot be replayed on its own.
+    """
     if text.startswith(FIXTURE_PREFIX):
         name = text.removeprefix(FIXTURE_PREFIX)
         if not name:
             raise CaseError(f"Case identifier {text!r} names no fixture")
         return FixtureOrigin(name)
     if text.startswith(GENERATED_PREFIX):
-        parts = text.removeprefix(GENERATED_PREFIX).rsplit(":", 2)
-        if len(parts) == 3 and parts[0]:
-            generator_name, size_part, seed_part = parts
-            size = _labeled_integer(text, size_part, "size")
-            if size < 0:
-                raise CaseError(f"Case identifier {text!r} has a negative size")
-            return GeneratedOrigin(generator_name, _labeled_integer(text, seed_part, "seed"), size)
+        origin = _parse_generated_identifier(text)
+        if origin is not None:
+            return origin
     if text.startswith(SHRUNK_PREFIX):
         raise CaseError(
             f"Case identifier {text!r} names a shrunk input, which cannot be replayed on its own. "
@@ -253,8 +435,21 @@ def parse_case_identifier(text: str) -> FixtureOrigin | GeneratedOrigin:
     )
 
 
-def resolve_case(problem: Problem[Any, Any, Any], identifier: str) -> Case[Any]:
-    """Rebuild the case named by ``identifier``; raise :class:`CaseError` if there is none."""
+def resolve_case(problem: "AnyProblem", identifier: str) -> AnyCase:
+    """Rebuild the case named by an identifier.
+
+    Args:
+        problem: The problem.
+        identifier: The identifier of a fixture or generated case.
+
+    Returns:
+        The case, with the same input as in the run that printed the identifier.
+
+    Raises:
+        CaseError: If the identifier is malformed or names no fixture,
+            generator or size the problem has.
+        HookError: If a hook fails.
+    """
     origin = parse_case_identifier(identifier)
     if isinstance(origin, FixtureOrigin):
         fixtures = problem_fixtures(problem)
@@ -268,13 +463,21 @@ def resolve_case(problem: Problem[Any, Any, Any], identifier: str) -> Case[Any]:
     return generate_case(generator, size=origin.size, seed=origin.seed)
 
 
-def select_generators(
-    problem: Problem[Any, Any, Any], names: Sequence[str]
-) -> list[InputGenerator[Any]]:
-    """Return the generators called ``names``, in that order and each once.
+def select_generators(problem: "AnyProblem", names: Sequence[str]) -> list[AnyInputGenerator]:
+    """Select generators by name (users call generators distributions).
 
-    With no names, return all of the problem's generators. Raise :class:`CaseError`
-    for a name the problem does not define (users call generators distributions).
+    Args:
+        problem: The problem.
+        names: The generator names. Empty means all of the problem's generators.
+
+    Returns:
+        The generators called ``names``, in that order and each once, or all of
+        the problem's generators when ``names`` is empty.
+
+    Raises:
+        CaseError: If the problem defines no generator or ``names`` holds an
+            unknown name.
+        HookError: If the ``generators`` hook fails.
     """
     generators = problem_generators(problem)
     if not generators:
@@ -290,49 +493,33 @@ def select_generators(
     return [by_name[name] for name in dict.fromkeys(names)]
 
 
-def problem_fixtures(problem: Problem[Any, Any, Any]) -> list[Fixture[Any]]:
-    """Return the problem's fixtures.
+def problem_fixtures(problem: "AnyProblem") -> list[AnyFixture]:
+    """Call the problem's ``fixtures`` hook and check what it returns.
 
-    Raise :class:`~algorithm_playground.core.hooks.HookError` when the
-    ``fixtures`` hook raises or yields something that is not a :class:`Fixture`.
+    Args:
+        problem: The problem.
+
+    Returns:
+        The fixtures.
+
+    Raises:
+        HookError: If the hook raises or yields something that is not a
+            :class:`Fixture`.
     """
     return call_hook("fixtures", lambda: _checked_list(problem.fixtures(), Fixture))
 
 
-def problem_generators(problem: Problem[Any, Any, Any]) -> list[InputGenerator[Any]]:
-    """Return the problem's generators, the default one first.
+def problem_generators(problem: "AnyProblem") -> list[AnyInputGenerator]:
+    """Call the problem's ``generators`` hook and check what it returns.
 
-    Raise :class:`~algorithm_playground.core.hooks.HookError` when the
-    ``generators`` hook raises or returns something that is not made of
-    :class:`InputGenerator` objects.
+    Args:
+        problem: The problem.
+
+    Returns:
+        The generators, the default one first.
+
+    Raises:
+        HookError: If the hook raises or returns something that is not made of
+            :class:`InputGenerator` objects.
     """
     return call_hook("generators", lambda: _checked_list(problem.generators(), InputGenerator))
-
-
-def _checked_list(items: Iterable[Any], expected: type) -> list[Any]:
-    """Collect ``items``, requiring each to be an instance of ``expected``."""
-    collected = list(items)
-    for item in collected:
-        if not isinstance(item, expected):
-            raise TypeError(
-                f"it returned a {type(item).__name__} where a {expected.__name__} belongs"
-            )
-    return collected
-
-
-def _labeled_integer(identifier: str, part: str, label: str) -> int:
-    """Parse ``label=N`` where ``N`` is written the way identifiers write it (``5``, not ``05``)."""
-    prefix = f"{label}="
-    if part.startswith(prefix):
-        digits = part.removeprefix(prefix)
-        try:
-            value = int(digits)
-        except ValueError:
-            pass
-        else:
-            if str(value) == digits:
-                return value
-    raise CaseError(
-        f"Case identifier {identifier!r} has no valid '{label}=N' part: N must be a plain "
-        "integer, without a plus sign, leading zeros, underscores, or spaces"
-    )

@@ -8,6 +8,7 @@ interactive stepper and its key input are in
 """
 
 from algorithm_playground.visualization.charts import (
+    AxisScale,
     BarHighlight,
     ChartSeries,
     line_chart,
@@ -16,6 +17,7 @@ from algorithm_playground.visualization.charts import (
 )
 
 __all__ = [
+    "AxisScale",
     "BarHighlight",
     "ChartSeries",
     "line_chart",

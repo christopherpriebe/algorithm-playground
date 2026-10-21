@@ -14,10 +14,8 @@ them, such as one a faulty write stored, takes the height of the next larger
 rank. The caption carries the actual values.
 """
 
-from __future__ import annotations
-
 from bisect import bisect_left
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 
 from algorithm_playground.core.frames import Frame, FrameSequence
 from algorithm_playground.problems.sorting.events import EventLog, EventType
@@ -28,6 +26,16 @@ from algorithm_playground.visualization import (
     render_bar_chart,
     render_side_by_side_bar_charts,
 )
+
+__all__ = [
+    "CHANGED_COLOR",
+    "CHART_HEIGHT",
+    "EVENT_COLORS",
+    "MAXIMUM_LISTED_INDICES",
+    "MAXIMUM_LISTED_VALUES",
+    "sorting_input_output_frame",
+    "sorting_trace_frames",
+]
 
 CHART_HEIGHT = 18
 MAXIMUM_LISTED_INDICES = 12
@@ -40,14 +48,14 @@ EVENT_COLORS = {
 CHANGED_COLOR = "red"
 
 
-class _Ranks:
-    """Bar heights: the rank of a value among the distinct values of the starting array."""
+def _list_distinct_values(start: Sequence[int]) -> list[int]:
+    """List the distinct values of the starting array in ascending order."""
+    return sorted(set(start))
 
-    def __init__(self, start: Iterable[int]) -> None:
-        self._universe = sorted(set(start))
 
-    def heights(self, values: Sequence[int]) -> list[int]:
-        return [bisect_left(self._universe, value) + 1 for value in values]
+def _rank_heights(distinct_values: Sequence[int], values: Sequence[int]) -> list[int]:
+    """Return the bar height of every value: its rank among the distinct starting values."""
+    return [bisect_left(distinct_values, value) + 1 for value in values]
 
 
 def _describe_values(values: Sequence[int], indices: Sequence[int]) -> str:
@@ -56,44 +64,49 @@ def _describe_values(values: Sequence[int], indices: Sequence[int]) -> str:
     return listed + (", ..." if len(indices) > MAXIMUM_LISTED_VALUES else "")
 
 
-def sorting_trace_frames(input_values: Sequence[int], trace: SortingTrace) -> Sequence[Frame]:
-    """Return the frames of ``trace``: one per event plus the start, else one per snapshot.
-
-    ``input_values`` is the array the events act on when the trace has no snapshot.
-    """
-    if trace.events is not None:
-        return _event_frames(start_values(trace, input_values), trace.events)
-    return _snapshot_frames(trace)
-
-
-def sorting_input_output_frame(input_data: list[int], output: list[int]) -> Frame:
-    """Return the input and the output side by side."""
-    if not input_data:
-        return Frame("(empty input)")
-    ranks = _Ranks(input_data)
-    body = render_side_by_side_bar_charts(
-        ranks.heights(input_data),
-        ranks.heights(output),
-        left_title="input",
-        right_title="output (sorted)",
+def _describe_totals(events: EventLog, position: int) -> str:
+    """Describe the operations among the first ``position`` events."""
+    return (
+        f"so far: {events.count_of(EventType.COMPARE, before=position)} compares, "
+        f"{events.count_of(EventType.SWAP, before=position)} swaps, "
+        f"{events.count_of(EventType.WRITE, before=position)} writes"
     )
-    return Frame(body, caption="input and output (bar height = rank among the input values)")
+
+
+def _find_changed_indices(snapshots: Sequence[tuple[int, ...]], position: int) -> tuple[int, ...]:
+    """Return the indices that differ from the previous snapshot, if it has the same length."""
+    values = snapshots[position]
+    if position == 0 or len(snapshots[position - 1]) != len(values):
+        return ()
+    previous = snapshots[position - 1]
+    return tuple(index for index in range(len(values)) if values[index] != previous[index])
+
+
+def _describe_snapshot(position: int, values: Sequence[int], changed: tuple[int, ...]) -> str:
+    if position == 0:
+        return "first snapshot"
+    elif not changed:
+        return "no position changed since the previous snapshot"
+    else:
+        listed = ", ".join(str(index) for index in changed[:MAXIMUM_LISTED_INDICES])
+        more = ", ..." if len(changed) > MAXIMUM_LISTED_INDICES else ""
+        return (
+            f"changed since the previous snapshot: indices {listed}{more}\n"
+            f"values now: {_describe_values(values, changed)}"
+        )
 
 
 def _event_frames(start: tuple[int, ...], events: EventLog) -> FrameSequence:
     timeline = sorting_timeline(start, events)
-    ranks = _Ranks(start)
+    distinct_values = _list_distinct_values(start)
     event_count = len(events)
 
-    def build(position: int) -> Frame:
+    def _build_frame(position: int) -> Frame:
+        """Build the frame drawn after the first ``position`` events."""
         values = timeline.state_after(position)
-        totals = (
-            f"so far: {events.count_of(EventType.COMPARE, before=position)} compares, "
-            f"{events.count_of(EventType.SWAP, before=position)} swaps, "
-            f"{events.count_of(EventType.WRITE, before=position)} writes"
-        )
+        totals = _describe_totals(events, position)
         title = f"{len(values)} values (bar height = rank)"
-        heights = ranks.heights(values)
+        heights = _rank_heights(distinct_values, values)
         if position == 0:
             body = render_bar_chart(heights, title=title, height=CHART_HEIGHT)
             return Frame(body, f"start: {event_count} events follow\n{totals}")
@@ -113,39 +126,63 @@ def _event_frames(start: tuple[int, ...], events: EventLog) -> FrameSequence:
             indices,
         )
 
-    return FrameSequence(event_count + 1, build)
+    return FrameSequence(event_count + 1, _build_frame)
 
 
 def _snapshot_frames(trace: SortingTrace) -> FrameSequence:
     snapshots = trace.snapshots
-    ranks = _Ranks(snapshots[0] if snapshots else ())
+    distinct_values = _list_distinct_values(snapshots[0] if snapshots else ())
 
-    def build(position: int) -> Frame:
+    def _build_frame(position: int) -> Frame:
+        """Build the frame of the snapshot at ``position``."""
         values = snapshots[position]
         title = f"snapshot {position + 1} / {len(snapshots)} (bar height = rank)"
-        changed: tuple[int, ...] = ()
-        if position > 0 and len(snapshots[position - 1]) == len(values):
-            previous = snapshots[position - 1]
-            changed = tuple(
-                index for index in range(len(values)) if values[index] != previous[index]
-            )
+        changed = _find_changed_indices(snapshots, position)
         highlights = (BarHighlight(changed, CHANGED_COLOR, "changed"),) if changed else ()
         body = render_bar_chart(
-            ranks.heights(values), title=title, highlights=highlights, height=CHART_HEIGHT
+            _rank_heights(distinct_values, values),
+            title=title,
+            highlights=highlights,
+            height=CHART_HEIGHT,
         )
-        return Frame(body, _snapshot_caption(position, values, changed), changed)
+        return Frame(body, _describe_snapshot(position, values, changed), changed)
 
-    return FrameSequence(len(snapshots), build)
+    return FrameSequence(len(snapshots), _build_frame)
 
 
-def _snapshot_caption(position: int, values: Sequence[int], changed: tuple[int, ...]) -> str:
-    if position == 0:
-        return "first snapshot"
-    if not changed:
-        return "no position changed since the previous snapshot"
-    listed = ", ".join(str(index) for index in changed[:MAXIMUM_LISTED_INDICES])
-    more = ", ..." if len(changed) > MAXIMUM_LISTED_INDICES else ""
-    return (
-        f"changed since the previous snapshot: indices {listed}{more}\n"
-        f"values now: {_describe_values(values, changed)}"
+def sorting_trace_frames(input_values: Sequence[int], trace: SortingTrace) -> Sequence[Frame]:
+    """Build the frames of a trace: one per event plus the start, else one per snapshot.
+
+    Args:
+        input_values: The array the events act on when the trace has no snapshot.
+        trace: The trace to draw.
+
+    Returns:
+        The frames, built on demand.
+    """
+    if trace.events is not None:
+        return _event_frames(start_values(trace, input_values), trace.events)
+    else:
+        return _snapshot_frames(trace)
+
+
+def sorting_input_output_frame(input_data: list[int], output: list[int]) -> Frame:
+    """Draw the input and the output side by side.
+
+    Args:
+        input_data: The array that was sorted.
+        output: The array the executable produced.
+
+    Returns:
+        A frame with two bar charts, or a note when the input is empty.
+    """
+    if not input_data:
+        return Frame("(empty input)")
+    distinct_values = _list_distinct_values(input_data)
+    body = render_side_by_side_bar_charts(
+        _rank_heights(distinct_values, input_data),
+        _rank_heights(distinct_values, output),
+        left_title="input",
+        right_title="output (sorted)",
     )
+    return Frame(body, caption="input and output (bar height = rank among the input values)")

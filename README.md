@@ -243,6 +243,8 @@ make -C examples/sorting
 
 ```sh
 uv run pytest                       # unit + integration tests, in parallel (pytest-xdist)
+uv run pytest tests/unit            # only the unit tests, which mirror src/algorithm_playground
+uv run pytest tests/integration     # only the end-to-end CLI tests
 uv run pytest -n 0 --pdb            # serially, for debugging a failure
 uv run ruff check . && uv run ruff format --check .
 uv run ty check                     # static type checking

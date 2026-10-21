@@ -364,6 +364,12 @@ registered problem offers: its fixtures with their descriptions, its
 distributions (the default and the debug one marked), whether it has a trace
 format, and its operation names.
 
+Registering a problem in a test changes a table that the whole process shares.
+:func:`~algorithm_playground.core.registry.snapshot_registry` copies the table
+and :func:`~algorithm_playground.core.registry.restore_registry` puts the copy
+back, so a test or a fixture can undo whatever a test registered or loaded:
+take the snapshot first and restore it once the test is over.
+
 Checking a problem
 ------------------
 
@@ -394,7 +400,7 @@ text; and that the ``shrink`` candidates that ``check_input`` accepts serialize 
 differ from their input (a hook that yields copies of its input would never make
 progress). It cannot check
 the trace hooks, which need a trace; test those with a trace file of your own,
-as ``tests/test_sorting_trace.py`` does.
+as ``tests/unit/problems/sorting/test_trace.py`` does.
 
 Worked example
 --------------

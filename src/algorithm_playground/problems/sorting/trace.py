@@ -6,8 +6,6 @@ snapshots and kind ``1`` holds events. Sections may repeat, and their contents
 are joined in file order. See :doc:`/problems/sorting` for the byte layout.
 """
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,8 +25,34 @@ from algorithm_playground.problems.sorting.events import (
     EventType,
 )
 
+__all__ = [
+    "EVENT_TRACE_KIND",
+    "SNAPSHOT_TRACE_KIND",
+    "SortingTrace",
+    "count_operations",
+    "read_trace",
+    "start_values",
+]
+
 SNAPSHOT_TRACE_KIND = 0
 EVENT_TRACE_KIND = 1
+
+
+def _read_snapshots(stream: BinaryIO) -> list[tuple[int, ...]]:
+    snapshot_count = read_u32(stream)
+    return [tuple(read_i32_array(stream, read_u64(stream))) for _ in range(snapshot_count)]
+
+
+def _read_event_records(stream: BinaryIO) -> bytes:
+    event_count = read_u64(stream)
+    return read_record_bytes(stream, event_count, EVENT_RECORD_BYTES, "events")
+
+
+def _check_events(events: EventLog, array_length: int) -> None:
+    """Raise unless every event names an index inside the array it acts on."""
+    problem = events.check(array_length)
+    if problem is not None:
+        raise BinaryFormatError(f"Invalid event trace: {problem}")
 
 
 @dataclass(frozen=True)
@@ -47,20 +71,36 @@ class SortingTrace:
 
 
 def start_values(trace: SortingTrace, input_values: Sequence[int]) -> tuple[int, ...]:
-    """Return the array the events of ``trace`` act on: the first snapshot, else the input."""
+    """Return the array the events of a trace act on: the first snapshot, else the input.
+
+    Args:
+        trace: The trace whose events are replayed.
+        input_values: The input of the run that recorded the trace.
+
+    Returns:
+        The array before the first event.
+    """
     if trace.snapshots:
         return trace.snapshots[0]
-    return tuple(input_values)
+    else:
+        return tuple(input_values)
 
 
 def read_trace(path: Path, input_values: Sequence[int]) -> SortingTrace | None:
-    """Read a trace file; return ``None`` when it holds no snapshots and no events.
+    """Read a trace file.
 
-    ``input_values`` is the input of the run: it is the array length that
-    event indices are checked against when there is no snapshot. Raise
-    :class:`~algorithm_playground.core.binary_format.BinaryFormatError` for an
-    unknown section kind, a truncated section, a count that promises more than
-    the file holds, an unknown event type, or an event index outside the array.
+    Args:
+        path: The trace file.
+        input_values: The input of the run. Its length is what event indices
+            are checked against when there is no snapshot.
+
+    Returns:
+        The trace, or ``None`` when the file holds no snapshots and no events.
+
+    Raises:
+        algorithm_playground.core.binary_format.BinaryFormatError: If a section kind is unknown, a section is
+            truncated, a count promises more than the file holds, an event type
+            is unknown, or an event index is outside the array.
     """
     with path.open("rb") as stream:
         sections = read_sections(
@@ -75,14 +115,19 @@ def read_trace(path: Path, input_values: Sequence[int]) -> SortingTrace | None:
         return None
     trace = SortingTrace(snapshots, events)
     if events is not None:
-        problem = events.check(len(start_values(trace, input_values)))
-        if problem is not None:
-            raise BinaryFormatError(f"Invalid event trace: {problem}")
+        _check_events(events, len(start_values(trace, input_values)))
     return trace
 
 
 def count_operations(trace: SortingTrace) -> dict[str, int] | None:
-    """Count compares, swaps, and writes; ``None`` when the trace has no event section."""
+    """Count the compares, swaps, and writes of a trace.
+
+    Args:
+        trace: The trace to count.
+
+    Returns:
+        The counts by operation name, or ``None`` when the trace has no event section.
+    """
     if trace.events is None:
         return None
     return {
@@ -90,13 +135,3 @@ def count_operations(trace: SortingTrace) -> dict[str, int] | None:
         "swaps": trace.events.count_of(EventType.SWAP),
         "writes": trace.events.count_of(EventType.WRITE),
     }
-
-
-def _read_snapshots(stream: BinaryIO) -> list[tuple[int, ...]]:
-    snapshot_count = read_u32(stream)
-    return [tuple(read_i32_array(stream, read_u64(stream))) for _ in range(snapshot_count)]
-
-
-def _read_event_records(stream: BinaryIO) -> bytes:
-    event_count = read_u64(stream)
-    return read_record_bytes(stream, event_count, EVENT_RECORD_BYTES, "events")

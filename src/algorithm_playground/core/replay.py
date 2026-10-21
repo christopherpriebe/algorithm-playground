@@ -8,10 +8,10 @@ A problem supplies the starting state, the events, and ``apply``, which says
 what a run of events does to a state.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from typing import Generic, TypeVar
+
+__all__ = ["DEFAULT_CHECKPOINT_INTERVAL", "StateTimeline"]
 
 StateT = TypeVar("StateT")
 EventT = TypeVar("EventT")
@@ -22,14 +22,25 @@ DEFAULT_CHECKPOINT_INTERVAL = 256
 class StateTimeline(Generic[StateT, EventT]):
     """The state after any number of events, recovered from stored checkpoints.
 
-    ``apply(state, events)`` returns the state after ``events`` (a sequence
-    taken from ``events`` as given) have happened to ``state``. It must not
-    modify the ``state`` it receives, because that may be a checkpoint; an
-    immutable state such as a tuple makes that easy. A checkpoint is stored
-    every ``checkpoint_interval`` events, so memory is proportional to the
-    number of events divided by the interval, and a lookup replays fewer than
-    ``checkpoint_interval`` events. Choose an interval about the size of the
-    state to balance the two. ``final_state`` is the state after every event.
+    A checkpoint is stored every ``checkpoint_interval`` events, so memory is
+    proportional to the number of events divided by the interval, and a lookup
+    replays fewer than ``checkpoint_interval`` events. Choose an interval about
+    the size of the state to balance the two.
+
+    Args:
+        start_state: The state before the first event.
+        events: The events, in order.
+        apply: Returns the state after a sequence of events (a slice of
+            ``events``) has happened to a state. It must not modify the state
+            it receives, because that may be a checkpoint; an immutable state
+            such as a tuple makes that easy.
+        checkpoint_interval: The number of events between two checkpoints.
+
+    Attributes:
+        final_state: The state after every event.
+
+    Raises:
+        ValueError: If ``checkpoint_interval`` is below 1.
     """
 
     def __init__(
@@ -57,7 +68,19 @@ class StateTimeline(Generic[StateT, EventT]):
         self.final_state = apply(state, events[position:]) if position < len(events) else state
 
     def state_after(self, event_count: int) -> StateT:
-        """Return the state after the first ``event_count`` events."""
+        """Return the state after the first ``event_count`` events.
+
+        Args:
+            event_count: The number of events that have happened, from ``0``
+                to the number of events.
+
+        Returns:
+            The state, recovered from the nearest checkpoint.
+
+        Raises:
+            IndexError: If ``event_count`` is negative or exceeds the number of
+                events.
+        """
         if not 0 <= event_count <= len(self._events):
             raise IndexError(f"{event_count} events were not recorded: {len(self._events)} were")
         base = event_count // self._interval

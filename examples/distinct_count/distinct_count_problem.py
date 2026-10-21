@@ -7,8 +7,6 @@ Load it with ``--problem-module distinct_count_problem`` or, as the
 ``algorithm-playground.toml`` next to this file does, with ``problem_modules``.
 """
 
-from __future__ import annotations
-
 import random
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -31,8 +29,18 @@ I32_MIN = -(2**31)
 I32_MAX = 2**31 - 1
 
 
+def _uniform(random_generator: random.Random, size: int) -> list[int]:
+    return [random_generator.randint(I32_MIN, I32_MAX) for _ in range(size)]
+
+
+def _few_values(random_generator: random.Random, size: int) -> list[int]:
+    return [random_generator.randint(0, 4) for _ in range(size)]
+
+
 @register_problem
 class DistinctCountProblem(Problem[list[int], int, None]):
+    """Count the distinct values in an array of i32 values."""
+
     name = "distinct-count"
     description = "Count the distinct values in an array of 32-bit signed integers."
 
@@ -70,20 +78,13 @@ class DistinctCountProblem(Problem[list[int], int, None]):
         expected = len(set(input_data))
         if output == expected:
             return VerificationResult(passed=True)
-        return VerificationResult(
-            passed=False, message=f"Expected {expected} distinct values, got {output}"
-        )
+        else:
+            return VerificationResult(
+                passed=False, message=f"Expected {expected} distinct values, got {output}"
+            )
 
     def expected_output(self, input_data: list[int]) -> int:
         return len(set(input_data))
 
     def shrink(self, input_data: list[int]) -> Iterator[list[int]]:
         return shrink_sequence(input_data)
-
-
-def _uniform(random_generator: random.Random, size: int) -> list[int]:
-    return [random_generator.randint(I32_MIN, I32_MAX) for _ in range(size)]
-
-
-def _few_values(random_generator: random.Random, size: int) -> list[int]:
-    return [random_generator.randint(0, 4) for _ in range(size)]

@@ -170,10 +170,10 @@ and one event section:
 
 A writer is short in any language. This is the one the repository's own
 instrumented sorters use, in Python (it is the real code of
-``tests/instrumented_sort.py``, which is written from this page alone and shares
+``tests/helpers/instrumented_sort.py``, which is written from this page alone and shares
 nothing with the reader it tests):
 
-.. literalinclude:: ../../tests/instrumented_sort.py
+.. literalinclude:: ../../tests/helpers/instrumented_sort.py
    :language: python
    :pyobject: encode_trace
 
@@ -211,7 +211,7 @@ affordable.
 
 The format grows by adding kinds: a reader that does not know a kind rejects
 the file, as above. The repository's own example, ``examples/sorting/python_sort.py``, wraps the
-built-in sort and so writes only the two-snapshot trace. ``tests/instrumented_sort.py``
+built-in sort and so writes only the two-snapshot trace. ``tests/helpers/instrumented_sort.py``
 is a complete insertion sort and merge sort that write both sections; read it
 as the model for your own instrumented algorithm.
 

@@ -7,22 +7,24 @@ redrawing). A frame is text, so a problem builds one with any charting
 library, and so a test can compare frames without a terminal.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import overload
+
+__all__ = ["Frame", "FrameSequence"]
 
 
 @dataclass(frozen=True)
 class Frame:
     """One step of a trace, ready to display.
 
-    ``body`` is the picture as text, which may contain terminal color codes.
-    ``caption`` is a short description of the step, for example the operation
-    that led to it, and may span several lines. ``highlighted_indices`` names
-    the positions the body draws emphasized, so that a test or another tool
-    need not parse the body to know what the frame points at.
+    Args:
+        body: The picture as text, which may contain terminal color codes.
+        caption: A short description of the step, for example the operation
+            that led to it. It may span several lines.
+        highlighted_indices: The positions the body draws emphasized, so that
+            a test or another tool need not parse the body to know what the
+            frame points at.
     """
 
     body: str
@@ -36,6 +38,13 @@ class FrameSequence(Sequence[Frame]):
     A trace with a million events has a million frames, far too many to draw
     up front; the stepper only ever needs the current one. ``build`` receives
     the position of the frame and must be a pure function of it.
+
+    Args:
+        length: The number of frames.
+        build: Builds the frame at a position from ``0`` up to ``length - 1``.
+
+    Raises:
+        ValueError: If ``length`` is negative.
     """
 
     def __init__(self, length: int, build: Callable[[int], Frame]) -> None:

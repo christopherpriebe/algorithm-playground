@@ -52,6 +52,9 @@ from algorithm_playground.core.binary_format import (
     write_u64,
 )
 from algorithm_playground.core.cases import (
+    AnyCase,
+    AnyFixture,
+    AnyInputGenerator,
     Case,
     CaseError,
     CaseOrigin,
@@ -82,11 +85,12 @@ from algorithm_playground.core.configuration import (
     load_configuration,
     load_configured_problems,
 )
-from algorithm_playground.core.description import describe_sequence, truncate_text
+from algorithm_playground.core.description import describe_error, describe_sequence, truncate_text
 from algorithm_playground.core.frames import Frame, FrameSequence
 from algorithm_playground.core.hooks import HookError, call_hook
 from algorithm_playground.core.implementation import Implementation
 from algorithm_playground.core.problem import (
+    AnyProblem,
     Problem,
     VerificationResult,
     has_input_reader,
@@ -97,6 +101,7 @@ from algorithm_playground.core.registry import (
     ProblemRegistrationError,
     ProblemSource,
     ProblemSourceKind,
+    RegistrySnapshot,
     UnknownProblemError,
     get_problem,
     list_problems,
@@ -105,9 +110,15 @@ from algorithm_playground.core.registry import (
     problem_descriptions,
     problem_sources,
     register_problem,
+    restore_registry,
+    snapshot_registry,
 )
 from algorithm_playground.core.replay import StateTimeline
-from algorithm_playground.core.report import benchmark_report_to_json, correctness_report_to_json
+from algorithm_playground.core.report import (
+    JsonObject,
+    benchmark_report_to_json,
+    correctness_report_to_json,
+)
 from algorithm_playground.core.runner import (
     BuildError,
     Runner,
@@ -115,6 +126,7 @@ from algorithm_playground.core.runner import (
     RunnerFactory,
     RunnerLike,
     RunResult,
+    TemporaryFilePolicy,
     build_implementation,
     build_implementations,
     check_can_start,
@@ -130,7 +142,12 @@ from algorithm_playground.core.shrinking import (
     shrink_integers,
     shrink_sequence,
 )
-from algorithm_playground.core.single_run import CaseStatus, SingleRun, run_single
+from algorithm_playground.core.single_run import (
+    CaseStatus,
+    SingleRun,
+    run_single,
+    run_single_with_trace,
+)
 from algorithm_playground.core.statistics import (
     Growth,
     TimingSummary,
@@ -143,8 +160,10 @@ from algorithm_playground.core.testing import (
     CasePhase,
     CaseProgress,
     FailureDetail,
+    ShrinkOptions,
     ShrunkFailure,
     TestReport,
+    TestRunOptions,
     TestSettings,
     describe_failure,
     run_tests,
@@ -153,6 +172,10 @@ from algorithm_playground.core.validation import assert_valid_problem, validate_
 
 __all__ = [
     "DEFAULT_CONFIGURATION_FILE_NAME",
+    "AnyCase",
+    "AnyFixture",
+    "AnyInputGenerator",
+    "AnyProblem",
     "BenchmarkFailure",
     "BenchmarkPhase",
     "BenchmarkProgress",
@@ -184,6 +207,7 @@ __all__ = [
     "Implementation",
     "ImplementationBenchmark",
     "InputGenerator",
+    "JsonObject",
     "OperationIssue",
     "OperationIssueKind",
     "Problem",
@@ -191,18 +215,22 @@ __all__ = [
     "ProblemRegistrationError",
     "ProblemSource",
     "ProblemSourceKind",
+    "RegistrySnapshot",
     "RunResult",
     "Runner",
     "RunnerError",
     "RunnerFactory",
     "RunnerLike",
     "SavedInputs",
+    "ShrinkOptions",
     "ShrunkFailure",
     "ShrunkOrigin",
     "SingleRun",
     "SizeMeasurement",
     "StateTimeline",
+    "TemporaryFilePolicy",
     "TestReport",
+    "TestRunOptions",
     "TestSettings",
     "TimingSummary",
     "UnknownProblemError",
@@ -218,6 +246,7 @@ __all__ = [
     "check_sizes",
     "correctness_report_to_json",
     "default_generator",
+    "describe_error",
     "describe_failure",
     "describe_sequence",
     "distinct",
@@ -256,8 +285,10 @@ __all__ = [
     "read_u64",
     "register_problem",
     "resolve_case",
+    "restore_registry",
     "run_benchmark",
     "run_single",
+    "run_single_with_trace",
     "run_tests",
     "safe_file_name",
     "save_failing_inputs",
@@ -268,6 +299,7 @@ __all__ = [
     "shrink_integer_sequence",
     "shrink_integers",
     "shrink_sequence",
+    "snapshot_registry",
     "startup_case",
     "subprocess_runner_factory",
     "total_runs",

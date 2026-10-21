@@ -23,35 +23,35 @@ other distributions still run; the startup input and the problem's
 ``generators`` hook have to work, because nothing can be measured without
 them. The growth of the median time with the size is reported with its
 best-fitting class, and judged unreliable when the medians are too close to the
-startup median (see :meth:`ImplementationBenchmark.growth_is_reliable`). The engine never prints, and
-runs go through a runner factory that tests replace with an in-process fake.
+startup median (see :meth:`ImplementationBenchmark.is_growth_reliable`). The
+engine never prints, and runs go through a runner factory that tests replace
+with an in-process fake.
 """
-
-from __future__ import annotations
 
 import math
 import statistics
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any
 
-from algorithm_playground.core._support import describe_error, validate_implementations
+from algorithm_playground.core._support import validate_implementations
 from algorithm_playground.core.cases import (
-    Case,
+    AnyCase,
+    AnyInputGenerator,
     check_sizes,
     default_generator,
     generate_case,
     select_generators,
     startup_case,
 )
+from algorithm_playground.core.description import describe_error
 from algorithm_playground.core.hooks import HookError
 from algorithm_playground.core.implementation import Implementation
-from algorithm_playground.core.problem import Problem, has_trace_format
+from algorithm_playground.core.problem import AnyProblem, has_trace_format
 from algorithm_playground.core.runner import (
     RunnerError,
     RunnerFactory,
-    RunnerLike,
+    RunResult,
     subprocess_runner_factory,
 )
 from algorithm_playground.core.statistics import (
@@ -63,10 +63,35 @@ from algorithm_playground.core.statistics import (
     summarize,
 )
 
+__all__ = [
+    "MINIMUM_NOISE_FRACTION",
+    "NOISE_STANDARD_DEVIATIONS",
+    "BenchmarkFailure",
+    "BenchmarkPhase",
+    "BenchmarkProgress",
+    "BenchmarkReport",
+    "BenchmarkSettings",
+    "CellStatus",
+    "FailureStage",
+    "ImplementationBenchmark",
+    "OperationIssue",
+    "OperationIssueKind",
+    "SizeMeasurement",
+    "include_failed_implementations",
+    "run_benchmark",
+    "total_runs",
+]
+
 # A run is clearly slower than an empty-input run when it exceeds the startup median by
 # this many standard deviations of the startup samples, and by at least this fraction of it.
 NOISE_STANDARD_DEVIATIONS = 3.0
 MINIMUM_NOISE_FRACTION = 0.1
+
+
+def _require_unique(label: str, values: Sequence[object]) -> None:
+    repeated = sorted({value for value in values if values.count(value) > 1})
+    if repeated:
+        raise ValueError(f"{label} must be unique, but these were repeated: {repeated}")
 
 
 @dataclass(frozen=True)
@@ -96,16 +121,8 @@ class BenchmarkSettings:
             raise ValueError("At least one size is required")
         if any(size < 0 for size in self.sizes):
             raise ValueError(f"Sizes must be non-negative, got {self.sizes}")
-        repeated = sorted({size for size in self.sizes if self.sizes.count(size) > 1})
-        if repeated:
-            raise ValueError(f"Sizes must be unique, but these were repeated: {repeated}")
-        repeated_distributions = sorted(
-            {name for name in self.distributions if self.distributions.count(name) > 1}
-        )
-        if repeated_distributions:
-            raise ValueError(
-                f"Distributions must be unique, but these were repeated: {repeated_distributions}"
-            )
+        _require_unique("Sizes", self.sizes)
+        _require_unique("Distributions", self.distributions)
         if self.repetitions < 1:
             raise ValueError(f"Repetitions must be at least 1, got {self.repetitions}")
         if self.warmup < 0:
@@ -198,12 +215,12 @@ class FailureStage(Enum):
     DISTRIBUTION = "distribution"
 
     @property
-    def precedes_measurement(self) -> bool:
+    def is_before_measurement(self) -> bool:
         """Whether the implementation never got to run because of this failure."""
         return self in (FailureStage.BUILD, FailureStage.CANNOT_RUN)
 
     @property
-    def belongs_to_distribution(self) -> bool:
+    def is_distribution_specific(self) -> bool:
         """Whether the failure affects one distribution and leaves the others and the startup."""
         return self in (FailureStage.MEASUREMENT, FailureStage.DISTRIBUTION)
 
@@ -253,11 +270,15 @@ class ImplementationBenchmark:
         return self.failures[0].message if self.failures else None
 
     def startup_status(self) -> CellStatus:
-        """Whether the startup row of this implementation was measured, failed, or skipped."""
+        """Say what became of the startup row of this implementation.
+
+        Returns:
+            Whether the startup row was measured, failed, or skipped.
+        """
         if self.startup is not None:
             return CellStatus.MEASURED
         for failure in self.failures:
-            if not failure.stage.belongs_to_distribution:
+            if not failure.stage.is_distribution_specific:
                 return CellStatus.FAILED
         return CellStatus.SKIPPED
 
@@ -268,11 +289,18 @@ class ImplementationBenchmark:
         ``SKIPPED``; the size at which the failure happened is ``FAILED``, and
         so is every size of an implementation whose build failed or that cannot
         run, and every size of a distribution whose generator raised.
+
+        Args:
+            distribution: The name of the distribution.
+            size: The input size.
+
+        Returns:
+            The status of the cell.
         """
         if self.measurement_at(distribution, size) is not None:
             return CellStatus.MEASURED
         for failure in self.failures:
-            if failure.stage.precedes_measurement:
+            if failure.stage.is_before_measurement:
                 return CellStatus.FAILED
             if failure.distribution != distribution:
                 continue
@@ -283,7 +311,14 @@ class ImplementationBenchmark:
         return CellStatus.SKIPPED
 
     def measurements_for(self, distribution: str) -> tuple[SizeMeasurement, ...]:
-        """Return the measurements of one distribution, in size order of the settings."""
+        """Select the measurements of one distribution.
+
+        Args:
+            distribution: The name of the distribution.
+
+        Returns:
+            Its measurements, in size order of the settings.
+        """
         return tuple(
             measurement
             for measurement in self.measurements
@@ -291,7 +326,15 @@ class ImplementationBenchmark:
         )
 
     def measurement_at(self, distribution: str, size: int) -> SizeMeasurement | None:
-        """Return the measurement for a distribution and size, or ``None`` if it was not made."""
+        """Look up the measurement for a distribution and size.
+
+        Args:
+            distribution: The name of the distribution.
+            size: The input size.
+
+        Returns:
+            The measurement, or ``None`` if it was not made.
+        """
         for measurement in self.measurements:
             if measurement.distribution == distribution and measurement.size == size:
                 return measurement
@@ -301,13 +344,18 @@ class ImplementationBenchmark:
         """Estimate how the median time grows with the size for one distribution.
 
         The fit always uses the medians of the unadjusted samples minus the
-        median startup time (the statistic :meth:`growth_is_reliable` compares
+        median startup time (the statistic :meth:`is_growth_reliable` compares
         with), whether or not the settings subtract startup from the reported
         samples: a constant startup cost flattens any curve, so growth fitted on
         total times would describe process startup rather than the algorithm.
         Without a startup measurement the unadjusted medians are used.
-        See :func:`~algorithm_playground.core.statistics.estimate_growth` for when
-        there is no estimate.
+
+        Args:
+            distribution: The name of the distribution.
+
+        Returns:
+            The growth, or ``None`` when there is no estimate (see
+            :func:`~algorithm_playground.core.statistics.estimate_growth`).
         """
         measurements = self.measurements_for(distribution)
         startup_seconds = self.startup.median if self.startup is not None else 0.0
@@ -319,7 +367,7 @@ class ImplementationBenchmark:
             ],
         )
 
-    def growth_is_reliable(self, distribution: str) -> bool:
+    def is_growth_reliable(self, distribution: str) -> bool:
         """Whether enough medians are clearly above the startup time to trust the time growth.
 
         A run of a fast program is mostly process startup, and the fitted growth
@@ -328,6 +376,12 @@ class ImplementationBenchmark:
         a median (of the unadjusted samples) above the startup median by more than
         the noise of the startup samples. It is judged reliable when there is no
         startup measurement to compare with.
+
+        Args:
+            distribution: The name of the distribution.
+
+        Returns:
+            ``True`` when the growth of the distribution can be trusted.
         """
         if self.startup is None:
             return True
@@ -342,7 +396,11 @@ class ImplementationBenchmark:
         return clear >= MINIMUM_GROWTH_POINTS
 
     def operation_names(self) -> tuple[str, ...]:
-        """Return the names of the operations this implementation reported, in first-seen order."""
+        """List the operations this implementation reported.
+
+        Returns:
+            The operation names, in first-seen order.
+        """
         names: dict[str, None] = {}
         for measurement in self.measurements:
             names.update(dict.fromkeys(measurement.operation_counts or {}))
@@ -351,9 +409,13 @@ class ImplementationBenchmark:
     def operation_growth(self, distribution: str) -> dict[str, Growth | None]:
         """Estimate how each reported operation count grows with the size for one distribution.
 
-        Every operation this implementation reported has an entry; it is
-        ``None`` when fewer than three sizes had a positive count. See
-        :func:`~algorithm_playground.core.statistics.estimate_growth`.
+        Args:
+            distribution: The name of the distribution.
+
+        Returns:
+            An entry for every operation this implementation reported; it is
+            ``None`` when fewer than three sizes had a positive count (see
+            :func:`~algorithm_playground.core.statistics.estimate_growth`).
         """
         measurements = [
             measurement
@@ -378,9 +440,368 @@ class BenchmarkReport:
     implementations: tuple[ImplementationBenchmark, ...]
 
     @property
-    def passed(self) -> bool:
+    def has_passed(self) -> bool:
         """Whether every implementation completed all of its runs."""
         return not any(benchmark.failures for benchmark in self.implementations)
+
+
+@dataclass(frozen=True)
+class _MeasurementPoint:
+    """Where a run belongs: a ``size`` of a ``distribution``, or the startup (both ``None``).
+
+    ``label`` names the point in failure messages.
+    """
+
+    label: str
+    size: int | None = None
+    distribution: str | None = None
+
+    @property
+    def warmup_phase(self) -> BenchmarkPhase:
+        """The phase of a discarded run at this point."""
+        return BenchmarkPhase.STARTUP if self.size is None else BenchmarkPhase.WARMUP
+
+    @property
+    def measurement_phase(self) -> BenchmarkPhase:
+        """The phase of a timed run at this point."""
+        return BenchmarkPhase.STARTUP if self.size is None else BenchmarkPhase.MEASUREMENT
+
+
+class _Benchmark:
+    """The state of one benchmark run: the runners and the failures so far.
+
+    A failure is recorded in ``failures``. It takes the implementation out of
+    the rest of its distribution, or out of everything when it happened in the
+    startup measurement.
+    """
+
+    def __init__(
+        self,
+        problem: AnyProblem,
+        implementations: Sequence[Implementation],
+        settings: BenchmarkSettings,
+        *,
+        runner_factory: RunnerFactory,
+        on_progress: Callable[[BenchmarkProgress], None] | None,
+    ) -> None:
+        self._problem = problem
+        self._implementations = implementations
+        self._runners = {
+            implementation.name: runner_factory(problem, implementation)
+            for implementation in implementations
+        }
+        self._settings = settings
+        self._on_progress = on_progress
+        self.failures: dict[str, list[BenchmarkFailure]] = {}
+        self._stopped: set[tuple[str, str | None]] = set()
+
+    def run(self, generators: Sequence[AnyInputGenerator]) -> BenchmarkReport:
+        """Measure the startup and then every size of every distribution.
+
+        Args:
+            generators: The generators of the distributions to measure.
+
+        Returns:
+            The report, with the failures recorded along the way.
+        """
+        startups = self._measure_startups()
+        measurements: dict[str, list[SizeMeasurement]] = {
+            implementation.name: [] for implementation in self._implementations
+        }
+        for generator in generators:
+            for name, measurement in self._measure_distribution(generator, startups):
+                measurements[name].append(measurement)
+        return BenchmarkReport(
+            problem_name=self._problem.name,
+            settings=self._settings,
+            implementations=tuple(
+                ImplementationBenchmark(
+                    implementation=implementation,
+                    startup=startups.get(implementation.name),
+                    measurements=tuple(measurements[implementation.name]),
+                    failures=tuple(self.failures.get(implementation.name, ())),
+                )
+                for implementation in self._implementations
+            ),
+        )
+
+    def _measure_point(
+        self, case: AnyCase, distribution: str, size: int
+    ) -> tuple[dict[str, list[float]], dict[str, Mapping[str, int]], dict[str, OperationIssue]]:
+        """Time every active implementation on ``case``; with counting on, also count operations.
+
+        Args:
+            case: The generated case to run.
+            distribution: The name of the distribution of the case.
+            size: The input size of the case.
+
+        Returns:
+            The wall-time samples of the implementations that completed every
+            run, the operation counts of those that reported some, and the
+            issues of those that could not.
+        """
+        point = _MeasurementPoint(f"size {size} ({distribution})", size, distribution)
+        samples = self._measure(case.input_data, point)
+        if not self._settings.count_operations:
+            return samples, {}, {}
+        counts, issues = self._count_operations(list(samples), case.input_data, point)
+        return samples, counts, issues
+
+    def _measure(self, input_data: object, point: _MeasurementPoint) -> dict[str, list[float]]:
+        """Time the active implementations on one input, round-robin.
+
+        The implementations that fail are recorded in ``failures`` and left out
+        of the result. A ``point`` without a size is the startup measurement.
+
+        Args:
+            input_data: The input to run.
+            point: Where the runs belong.
+
+        Returns:
+            The wall-time samples of the implementations that completed every run.
+        """
+        distribution = point.distribution
+        samples: dict[str, list[float]] = {
+            name: [] for name in self._active_names(distribution=distribution)
+        }
+        for _ in range(self._settings.warmup):
+            for name in self._active_names(samples, distribution=distribution):
+                self._execute(name, input_data, point, phase=point.warmup_phase)
+        for _ in range(self._settings.repetitions):
+            for name in self._active_names(samples, distribution=distribution):
+                self._record_sample(name, input_data, point, samples=samples)
+        return {
+            name: values
+            for name, values in samples.items()
+            if not self._is_stopped(name, distribution)
+        }
+
+    def _fail_distribution(self, distribution: str, message: str) -> None:
+        """Record that the problem could not generate the inputs of ``distribution``.
+
+        Every implementation that was still running in the distribution gets the
+        failure and takes no further part in it.
+
+        Args:
+            distribution: The name of the distribution.
+            message: What went wrong.
+        """
+        for name in self._active_names(distribution=distribution):
+            self.failures.setdefault(name, []).append(
+                BenchmarkFailure(FailureStage.DISTRIBUTION, message, distribution)
+            )
+            self._stopped.add((name, distribution))
+
+    def _measure_startups(self) -> dict[str, TimingSummary]:
+        """Time the active implementations on the startup input.
+
+        Returns:
+            The timing summary of every implementation that completed every run.
+        """
+        input_data = startup_case(self._problem, self._settings.seed).input_data
+        return {
+            name: summarize(samples)
+            for name, samples in self._measure(input_data, _MeasurementPoint("startup")).items()
+        }
+
+    def _measure_distribution(
+        self, generator: AnyInputGenerator, startups: Mapping[str, TimingSummary]
+    ) -> Iterator[tuple[str, SizeMeasurement]]:
+        """Measure every size of one distribution.
+
+        A generator that raises fails the distribution for every implementation
+        and ends it.
+
+        Args:
+            generator: The generator of the distribution.
+            startups: The startup summary of each implementation, subtracted
+                from the reported samples when the settings ask for it.
+
+        Yields:
+            The name of an implementation with its measurement at one size.
+        """
+        for size in self._settings.sizes:
+            try:
+                case = generate_case(generator, size=size, seed=self._settings.seed)
+            except HookError as error:
+                self._fail_distribution(
+                    generator.name,
+                    f"Could not generate the input of size {size:,} for the distribution "
+                    f"'{generator.name}': {error}",
+                )
+                return
+            yield from self._measure_size(case, startups, distribution=generator.name, size=size)
+
+    def _measure_size(
+        self,
+        case: AnyCase,
+        startups: Mapping[str, TimingSummary],
+        *,
+        distribution: str,
+        size: int,
+    ) -> Iterator[tuple[str, SizeMeasurement]]:
+        samples, counts, issues = self._measure_point(case, distribution, size)
+        for name, raw_samples in samples.items():
+            reported_samples = (
+                subtract_startup(raw_samples, startups[name].mean)
+                if self._settings.subtract_startup_time
+                else raw_samples
+            )
+            yield (
+                name,
+                SizeMeasurement(
+                    distribution=distribution,
+                    size=size,
+                    case_identifier=case.identifier,
+                    raw_samples=tuple(raw_samples),
+                    summary=summarize(reported_samples),
+                    operation_counts=counts.get(name),
+                    operation_issue=issues.get(name),
+                ),
+            )
+
+    def _is_stopped(self, name: str, distribution: str | None) -> bool:
+        return (name, None) in self._stopped or (name, distribution) in self._stopped
+
+    def _active_names(
+        self, among: Mapping[str, object] | None = None, *, distribution: str | None
+    ) -> list[str]:
+        """The implementations that may still run in ``distribution``, in run order."""
+        names = among if among is not None else self._runners
+        return [name for name in names if not self._is_stopped(name, distribution)]
+
+    def _fail(self, name: str, message: str, point: _MeasurementPoint) -> None:
+        """Record a failure; the implementation stops here for its distribution (or entirely)."""
+        stage = FailureStage.STARTUP if point.size is None else FailureStage.MEASUREMENT
+        self.failures.setdefault(name, []).append(
+            BenchmarkFailure(stage, message, point.distribution, point.size)
+        )
+        self._stopped.add((name, point.distribution))
+
+    def _execute(
+        self, name: str, input_data: object, point: _MeasurementPoint, *, phase: BenchmarkPhase
+    ) -> RunResult[object, object] | None:
+        """Run one implementation once; return the result, or ``None`` after recording a failure."""
+        self._report_started(name, phase, point)
+        try:
+            return self._runners[name].run(input_data)
+        except RunnerError as error:
+            self._fail(name, f"Run failed for {point.label}: {error}", point)
+            return None
+        finally:
+            self._report_completed(name, phase, point)
+
+    def _record_sample(
+        self,
+        name: str,
+        input_data: object,
+        point: _MeasurementPoint,
+        *,
+        samples: dict[str, list[float]],
+    ) -> None:
+        """Run one implementation once and keep its wall time when the run and its output are good."""
+        result = self._execute(name, input_data, point, phase=point.measurement_phase)
+        if result is None:
+            return
+        if self._settings.verify_outputs:
+            message = self._verification_failure(input_data, result.output)
+            if message is not None:
+                self._fail(name, f"Verification failed for {point.label}: {message}", point)
+                return
+        samples[name].append(result.wall_seconds)
+
+    def _verification_failure(self, input_data: object, output: object) -> str | None:
+        """Return why ``output`` was rejected, or ``None`` when it passed."""
+        try:
+            verification = self._problem.verify(input_data, output)
+        except Exception as error:  # The verify hook is problem code; report any failure of it.
+            return f"verification raised {describe_error(error)}"
+        return None if verification.passed else verification.message
+
+    def _count_operations(
+        self, names: list[str], input_data: object, point: _MeasurementPoint
+    ) -> tuple[dict[str, Mapping[str, int]], dict[str, OperationIssue]]:
+        """Run each of ``names`` once with a trace and read its operation counts.
+
+        Return the counts of the implementations that reported some and the
+        issue of each one that could not. A run that fails, or a problem hook
+        that raises, is recorded in ``failures`` like a failed timed run; an
+        output that does not verify and a malformed trace only cost the counts.
+        """
+        counts: dict[str, Mapping[str, int]] = {}
+        issues: dict[str, OperationIssue] = {}
+        for name in names:
+            if self._is_stopped(name, point.distribution):
+                continue
+            reported = self._count_one(name, input_data, point)
+            if isinstance(reported, OperationIssue):
+                issues[name] = reported
+            elif reported is not None:
+                counts[name] = reported
+        return counts, issues
+
+    def _count_one(
+        self, name: str, input_data: object, point: _MeasurementPoint
+    ) -> Mapping[str, int] | OperationIssue | None:
+        """Count the operations of one implementation, reporting progress.
+
+        Return the counts, the reason there are none, or ``None`` when the
+        implementation reported nothing.
+        """
+        phase = BenchmarkPhase.OPERATION_COUNT
+        self._report_started(name, phase, point)
+        try:
+            return self._counting_run(name, input_data)
+        except RunnerError as error:
+            message = f"Run failed for {point.label} while counting operations: {error}"
+            return self._fail_counting(name, message, point)
+        except Exception as error:  # The operation_counts hook is problem code.
+            message = (
+                f"Counting operations failed for {point.label}: "
+                f"operation_counts raised {describe_error(error)}"
+            )
+            return self._fail_counting(name, message, point)
+        finally:
+            self._report_completed(name, phase, point)
+
+    def _fail_counting(self, name: str, message: str, point: _MeasurementPoint) -> OperationIssue:
+        """Record a failed counting run and return the issue to report for it."""
+        self._fail(name, message, point)
+        return OperationIssue(OperationIssueKind.COUNTING_FAILED, message)
+
+    def _counting_run(
+        self, name: str, input_data: object
+    ) -> Mapping[str, int] | OperationIssue | None:
+        """Run once with a trace; return the counts, the reason there are none, or ``None``."""
+        result = self._runners[name].run_with_trace(input_data)
+        if self._settings.verify_outputs:
+            message = self._verification_failure(input_data, result.output)
+            if message is not None:
+                return OperationIssue(OperationIssueKind.UNVERIFIED_OUTPUT, message)
+        if result.trace_error is not None:
+            return OperationIssue(OperationIssueKind.MALFORMED_TRACE, result.trace_error)
+        if result.trace is None:
+            return None
+        counts = self._problem.operation_counts(input_data, result.output, result.trace)
+        return None if counts is None else dict(counts)
+
+    def _report_started(self, name: str, phase: BenchmarkPhase, point: _MeasurementPoint) -> None:
+        self._notify(
+            BenchmarkProgress(
+                name, phase, point.size, completed=False, distribution=point.distribution
+            )
+        )
+
+    def _report_completed(self, name: str, phase: BenchmarkPhase, point: _MeasurementPoint) -> None:
+        self._notify(
+            BenchmarkProgress(
+                name, phase, point.size, completed=True, distribution=point.distribution
+            )
+        )
+
+    def _notify(self, event: BenchmarkProgress) -> None:
+        if self._on_progress is not None:
+            self._on_progress(event)
 
 
 def include_failed_implementations(
@@ -388,13 +809,20 @@ def include_failed_implementations(
     implementations: Sequence[Implementation],
     failures: Mapping[str, BenchmarkFailure],
 ) -> BenchmarkReport:
-    """Return ``report`` with an entry, in the order of ``implementations``, for each failure.
+    """Add an entry for each implementation that could not be measured at all.
 
-    ``failures`` maps the names of implementations that could not be measured
-    at all, because their build failed or their command cannot be started, to
-    the failure (a ``BUILD`` or ``CANNOT_RUN`` one). Each shows up as an
-    implementation that failed before its first measurement. The others keep the
-    entries of ``report``.
+    Each shows up as an implementation that failed before its first
+    measurement. The others keep the entries of ``report``.
+
+    Args:
+        report: The report of the implementations that were measured.
+        implementations: All the implementations, in the order the result lists them.
+        failures: A ``BUILD`` or ``CANNOT_RUN`` failure for each implementation
+            whose build failed or whose command cannot be started, keyed by name.
+
+    Returns:
+        The report with an entry for every implementation, in the order of
+        ``implementations``.
     """
     measured = {benchmark.implementation.name: benchmark for benchmark in report.implementations}
     entries = tuple(
@@ -412,10 +840,17 @@ def include_failed_implementations(
 
 
 def total_runs(settings: BenchmarkSettings, implementation_count: int) -> int:
-    """Return the most executable runs a benchmark can perform (for progress bars).
+    """Count the most executable runs a benchmark can perform (for progress bars).
 
     A failing implementation skips its remaining runs, so the actual number
     can be lower.
+
+    Args:
+        settings: The settings of the benchmark.
+        implementation_count: How many implementations are benchmarked.
+
+    Returns:
+        The number of runs.
     """
     distribution_count = max(len(settings.distributions), 1)
     points = distribution_count * len(settings.sizes)
@@ -425,7 +860,7 @@ def total_runs(settings: BenchmarkSettings, implementation_count: int) -> int:
 
 
 def run_benchmark(
-    problem: Problem[Any, Any, Any],
+    problem: AnyProblem,
     implementations: Sequence[Implementation],
     settings: BenchmarkSettings,
     *,
@@ -434,15 +869,27 @@ def run_benchmark(
 ) -> BenchmarkReport:
     """Benchmark every implementation on identical inputs and return the comparison.
 
-    ``on_progress`` receives an event before and after each executable run
-    that is attempted. ``runner_factory`` replaces the process-spawning runner
-    (it receives the problem and the implementation). Raise
-    :class:`~algorithm_playground.core.cases.CaseError` for a distribution the
-    problem does not define and for a size below the problem's ``minimum_size``,
-    and :class:`~algorithm_playground.core.hooks.HookError` when the problem's
-    ``generators`` hook raises or the generator of the startup input does. A
-    generator that raises for a later input is a failure of its distribution
-    (stage ``DISTRIBUTION``) and the run goes on.
+    A generator that raises for an input after the startup input is a failure
+    of its distribution (stage ``DISTRIBUTION``) and the run goes on.
+
+    Args:
+        problem: The problem that generates and verifies the inputs.
+        implementations: The implementations to benchmark.
+        settings: The parameters of the run.
+        runner_factory: Replaces the process-spawning runner; it receives the
+            problem and the implementation.
+        on_progress: Receives an event before and after each executable run
+            that is attempted.
+
+    Returns:
+        The report, whose settings list the distributions it measured.
+
+    Raises:
+        ValueError: If there is no implementation or names repeat.
+        CaseError: For a distribution the problem does not define and for a
+            size below the problem's ``minimum_size``.
+        HookError: When the problem's ``generators`` hook raises or the
+            generator of the startup input does.
     """
     validate_implementations(implementations)
     check_sizes(problem, settings.sizes)
@@ -458,279 +905,6 @@ def run_benchmark(
     )
     factory = runner_factory or subprocess_runner_factory(timeout_seconds=settings.timeout_seconds)
     benchmark = _Benchmark(
-        problem,
-        {
-            implementation.name: factory(problem, implementation)
-            for implementation in implementations
-        },
-        settings,
-        on_progress,
+        problem, implementations, settings, runner_factory=factory, on_progress=on_progress
     )
-
-    startups = {
-        name: summarize(samples)
-        for name, samples in benchmark.measure(
-            startup_case(problem, settings.seed).input_data, "startup"
-        ).items()
-    }
-    measurements: dict[str, list[SizeMeasurement]] = {
-        implementation.name: [] for implementation in implementations
-    }
-    for generator in generators:
-        for size in settings.sizes:
-            try:
-                case = generate_case(generator, size=size, seed=settings.seed)
-            except HookError as error:
-                message = (
-                    f"Could not generate the input of size {size:,} for the distribution "
-                    f"'{generator.name}': {error}"
-                )
-                benchmark.fail_distribution(generator.name, message)
-                break
-            samples, counts, issues = benchmark.measure_point(case, generator.name, size)
-            for name, raw_samples in samples.items():
-                reported_samples = (
-                    subtract_startup(raw_samples, startups[name].mean)
-                    if settings.subtract_startup_time
-                    else raw_samples
-                )
-                measurements[name].append(
-                    SizeMeasurement(
-                        distribution=generator.name,
-                        size=size,
-                        case_identifier=case.identifier,
-                        raw_samples=tuple(raw_samples),
-                        summary=summarize(reported_samples),
-                        operation_counts=counts.get(name),
-                        operation_issue=issues.get(name),
-                    )
-                )
-
-    return BenchmarkReport(
-        problem_name=problem.name,
-        settings=settings,
-        implementations=tuple(
-            ImplementationBenchmark(
-                implementation=implementation,
-                startup=startups.get(implementation.name),
-                measurements=tuple(measurements[implementation.name]),
-                failures=tuple(benchmark.failures.get(implementation.name, ())),
-            )
-            for implementation in implementations
-        ),
-    )
-
-
-class _Benchmark:
-    """The state of one benchmark run: the runners and the failures so far.
-
-    A failure is recorded in ``failures``. It takes the implementation out of
-    the rest of its distribution, or out of everything when it happened in the
-    startup measurement.
-    """
-
-    def __init__(
-        self,
-        problem: Problem[Any, Any, Any],
-        runners: dict[str, RunnerLike],
-        settings: BenchmarkSettings,
-        on_progress: Callable[[BenchmarkProgress], None] | None,
-    ) -> None:
-        self._problem = problem
-        self._runners = runners
-        self._settings = settings
-        self._on_progress = on_progress
-        self.failures: dict[str, list[BenchmarkFailure]] = {}
-        self._stopped: set[tuple[str, str | None]] = set()
-
-    def measure_point(
-        self, case: Case[Any], distribution: str, size: int
-    ) -> tuple[dict[str, list[float]], dict[str, Mapping[str, int]], dict[str, OperationIssue]]:
-        """Time every active implementation on ``case``; with counting on, also count operations.
-
-        Return the wall-time samples of the implementations that completed every
-        run, the operation counts of those that reported some, and the issues of
-        those that could not.
-        """
-        label = f"size {size} ({distribution})"
-        samples = self.measure(case.input_data, label, size=size, distribution=distribution)
-        if not self._settings.count_operations:
-            return samples, {}, {}
-        counts, issues = self._count_operations(
-            list(samples), case.input_data, label, size=size, distribution=distribution
-        )
-        return samples, counts, issues
-
-    def measure(
-        self,
-        input_data: Any,
-        label: str,
-        *,
-        size: int | None = None,
-        distribution: str | None = None,
-    ) -> dict[str, list[float]]:
-        """Time the active implementations on one input, round-robin.
-
-        Return the wall-time samples of the implementations that completed every
-        run. The others are recorded in ``failures`` and left out of the result.
-        A ``size`` of ``None`` marks the startup measurement.
-        """
-        samples: dict[str, list[float]] = {
-            name: [] for name in self._active_names(distribution=distribution)
-        }
-        for _ in range(self._settings.warmup):
-            for name in self._active_names(samples, distribution=distribution):
-                self._run_once(name, input_data, label, size, distribution, samples=None)
-        for _ in range(self._settings.repetitions):
-            for name in self._active_names(samples, distribution=distribution):
-                self._run_once(name, input_data, label, size, distribution, samples=samples)
-        return {
-            name: values
-            for name, values in samples.items()
-            if not self._is_stopped(name, distribution)
-        }
-
-    def _is_stopped(self, name: str, distribution: str | None) -> bool:
-        return (name, None) in self._stopped or (name, distribution) in self._stopped
-
-    def _active_names(
-        self, among: Mapping[str, object] | None = None, *, distribution: str | None
-    ) -> list[str]:
-        """The implementations that may still run in ``distribution``, in run order."""
-        names = among if among is not None else self._runners
-        return [name for name in names if not self._is_stopped(name, distribution)]
-
-    def fail_distribution(self, distribution: str, message: str) -> None:
-        """Record that the problem could not generate the inputs of ``distribution``.
-
-        Every implementation that was still running in the distribution gets the
-        failure and takes no further part in it.
-        """
-        for name in self._active_names(distribution=distribution):
-            self.failures.setdefault(name, []).append(
-                BenchmarkFailure(FailureStage.DISTRIBUTION, message, distribution)
-            )
-            self._stopped.add((name, distribution))
-
-    def _fail(self, name: str, message: str, *, size: int | None, distribution: str | None) -> None:
-        """Record a failure; the implementation stops here for its distribution (or entirely)."""
-        stage = FailureStage.STARTUP if size is None else FailureStage.MEASUREMENT
-        self.failures.setdefault(name, []).append(
-            BenchmarkFailure(stage, message, distribution, size)
-        )
-        self._stopped.add((name, distribution))
-
-    def _run_once(
-        self,
-        name: str,
-        input_data: Any,
-        label: str,
-        size: int | None,
-        distribution: str | None,
-        *,
-        samples: dict[str, list[float]] | None,
-    ) -> None:
-        """Run one implementation once; ``samples`` is ``None`` for a discarded warmup run."""
-        if size is None:
-            phase = BenchmarkPhase.STARTUP
-        else:
-            phase = BenchmarkPhase.WARMUP if samples is None else BenchmarkPhase.MEASUREMENT
-        self._report(name, phase, size, distribution, completed=False)
-        try:
-            result = self._runners[name].run(input_data, collect_trace=False)
-        except RunnerError as error:
-            self._fail(
-                name, f"Run failed for {label}: {error}", size=size, distribution=distribution
-            )
-            return
-        finally:
-            self._report(name, phase, size, distribution, completed=True)
-        if samples is None:
-            return
-        if self._settings.verify_outputs:
-            message = self._verification_failure(input_data, result.output)
-            if message is not None:
-                self._fail(
-                    name,
-                    f"Verification failed for {label}: {message}",
-                    size=size,
-                    distribution=distribution,
-                )
-                return
-        samples[name].append(result.wall_seconds)
-
-    def _verification_failure(self, input_data: Any, output: Any) -> str | None:
-        """Return why ``output`` was rejected, or ``None`` when it passed."""
-        try:
-            verification = self._problem.verify(input_data, output)
-        except Exception as error:
-            return f"verification raised {describe_error(error)}"
-        return None if verification.passed else verification.message
-
-    def _count_operations(
-        self, names: list[str], input_data: Any, label: str, *, size: int, distribution: str
-    ) -> tuple[dict[str, Mapping[str, int]], dict[str, OperationIssue]]:
-        """Run each of ``names`` once with a trace and read its operation counts.
-
-        Return the counts of the implementations that reported some and the
-        issue of each one that could not. A run that fails, or a problem hook
-        that raises, is recorded in ``failures`` like a failed timed run; an
-        output that does not verify and a malformed trace only cost the counts.
-        """
-        counts: dict[str, Mapping[str, int]] = {}
-        issues: dict[str, OperationIssue] = {}
-        phase = BenchmarkPhase.OPERATION_COUNT
-        for name in names:
-            if self._is_stopped(name, distribution):
-                continue
-            self._report(name, phase, size, distribution, completed=False)
-            try:
-                reported = self._counting_run(name, input_data)
-            except RunnerError as error:
-                message = f"Run failed for {label} while counting operations: {error}"
-                self._fail(name, message, size=size, distribution=distribution)
-                issues[name] = OperationIssue(OperationIssueKind.COUNTING_FAILED, message)
-                continue
-            except Exception as error:
-                message = (
-                    f"Counting operations failed for {label}: "
-                    f"operation_counts raised {describe_error(error)}"
-                )
-                self._fail(name, message, size=size, distribution=distribution)
-                issues[name] = OperationIssue(OperationIssueKind.COUNTING_FAILED, message)
-                continue
-            finally:
-                self._report(name, phase, size, distribution, completed=True)
-            if isinstance(reported, OperationIssue):
-                issues[name] = reported
-            elif reported is not None:
-                counts[name] = reported
-        return counts, issues
-
-    def _counting_run(
-        self, name: str, input_data: Any
-    ) -> Mapping[str, int] | OperationIssue | None:
-        """Run once with a trace; return the counts, the reason there are none, or ``None``."""
-        result = self._runners[name].run(input_data, collect_trace=True)
-        if self._settings.verify_outputs:
-            message = self._verification_failure(input_data, result.output)
-            if message is not None:
-                return OperationIssue(OperationIssueKind.UNVERIFIED_OUTPUT, message)
-        if result.trace_error is not None:
-            return OperationIssue(OperationIssueKind.MALFORMED_TRACE, result.trace_error)
-        if result.trace is None:
-            return None
-        counts = self._problem.operation_counts(input_data, result.output, result.trace)
-        return None if counts is None else dict(counts)
-
-    def _report(
-        self,
-        name: str,
-        phase: BenchmarkPhase,
-        size: int | None,
-        distribution: str | None,
-        *,
-        completed: bool,
-    ) -> None:
-        if self._on_progress is not None:
-            self._on_progress(BenchmarkProgress(name, phase, size, completed, distribution))
+    return benchmark.run(generators)

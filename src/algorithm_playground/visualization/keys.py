@@ -10,8 +10,6 @@ Keys: right arrow or ``n`` next, left arrow or ``p`` previous, ``g`` jump to a
 frame, space pause or resume auto-advance, ``q`` quit.
 """
 
-from __future__ import annotations
-
 import os
 import select
 import sys
@@ -21,7 +19,32 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from types import ModuleType
-from typing import Protocol, TextIO
+from typing import Protocol, Self, TextIO
+
+try:
+    import termios
+    import tty
+except ImportError:  # termios and tty exist on POSIX only.
+    termios = None  # ty: ignore[invalid-assignment]
+    tty = None  # ty: ignore[invalid-assignment]
+
+__all__ = [
+    "ESCAPE_WAIT_SECONDS",
+    "MAXIMUM_ESCAPE_BYTES",
+    "MAXIMUM_PASTE_BYTES",
+    "MAXIMUM_SHOWN_PASTE_CHARACTERS",
+    "PASTE_END",
+    "PASTE_START",
+    "PASTE_WAIT_SECONDS",
+    "Key",
+    "KeyPress",
+    "KeySource",
+    "LineKeySource",
+    "TerminalKeySource",
+    "decode_key",
+    "decode_line",
+    "terminal_key_source",
+]
 
 ESCAPE_WAIT_SECONDS = 0.05
 MAXIMUM_ESCAPE_BYTES = 8
@@ -30,6 +53,79 @@ MAXIMUM_PASTE_BYTES = 4096
 PASTE_START = b"\x1b[200~"
 PASTE_END = b"\x1b[201~"
 MAXIMUM_SHOWN_PASTE_CHARACTERS = 20
+
+
+def _is_terminal(stream: TextIO) -> bool:
+    try:
+        return stream.isatty()
+    except ValueError:  # A closed stream is not a terminal.
+        return False
+
+
+def _read_byte(descriptor: int, wait_seconds: float) -> bytes:
+    """Read one byte, waiting at most ``wait_seconds``; return nothing on a timeout or the end."""
+    if select.select([descriptor], [], [], wait_seconds)[0]:
+        return os.read(descriptor, 1)
+    else:
+        return b""
+
+
+def _is_end_of_escape_sequence(collected: bytes) -> bool:
+    """Tell whether the last byte of ``collected`` completes the sequence after an escape byte."""
+    if len(collected) == 1:
+        return collected not in (b"[", b"O")
+    else:
+        return 0x40 <= collected[-1] <= 0x7E
+
+
+def _read_escape_sequence(descriptor: int) -> bytes:
+    """Collect the bytes that follow an escape byte (an arrow key sends three in all)."""
+    collected = b""
+    while len(collected) < MAXIMUM_ESCAPE_BYTES:
+        byte = _read_byte(descriptor, ESCAPE_WAIT_SECONDS)
+        if not byte:
+            break
+        collected += byte
+        if _is_end_of_escape_sequence(collected):
+            break
+    return collected
+
+
+def _count_continuation_bytes(lead: int) -> int:
+    """Return how many bytes follow the first byte ``lead`` of a multi-byte UTF-8 character."""
+    if lead >= 0xF0:
+        return 3
+    elif lead >= 0xE0:
+        return 2
+    else:
+        return 1
+
+
+def _read_continuation_bytes(descriptor: int, lead: int) -> bytes:
+    """Collect the rest of a multi-byte UTF-8 character whose first byte is ``lead``."""
+    missing = _count_continuation_bytes(lead)
+    collected = b""
+    while len(collected) < missing:
+        byte = _read_byte(descriptor, ESCAPE_WAIT_SECONDS)
+        if not byte:
+            break
+        collected += byte
+    return collected
+
+
+def _read_paste_text(descriptor: int) -> str:
+    """Swallow a bracketed paste whole and return its text, shortened when it is long."""
+    collected = b""
+    while not collected.endswith(PASTE_END) and len(collected) < MAXIMUM_PASTE_BYTES:
+        byte = _read_byte(descriptor, PASTE_WAIT_SECONDS)
+        if not byte:
+            break
+        collected += byte
+    text = collected.removesuffix(PASTE_END).decode("utf-8", errors="replace")
+    if len(text) > MAXIMUM_SHOWN_PASTE_CHARACTERS:
+        return text[:MAXIMUM_SHOWN_PASTE_CHARACTERS] + "..."
+    else:
+        return text
 
 
 class Key(Enum):
@@ -62,48 +158,28 @@ class KeySource(Protocol):
     needs_enter: bool
 
     def read_key(self, timeout_seconds: float | None) -> KeyPress | None:
-        """Wait for the next key press; return ``None`` once ``timeout_seconds`` pass.
+        """Wait for the next key press.
 
-        ``None`` as the timeout waits without limit. The end of the input is a
-        quit key.
+        The end of the input is a quit key.
+
+        Args:
+            timeout_seconds: How long to wait, or ``None`` to wait without limit.
+
+        Returns:
+            The key press, or ``None`` once the timeout has passed.
         """
         ...
 
     def read_line(self, prompt: str) -> str | None:
-        """Show ``prompt`` and return the line typed in answer, or ``None`` at the end of input."""
+        """Show a prompt and read the line typed in answer.
+
+        Args:
+            prompt: The text to show before reading.
+
+        Returns:
+            The line, or ``None`` at the end of the input.
+        """
         ...
-
-
-def decode_key(data: bytes) -> KeyPress:
-    """Decode the bytes of one key press from a terminal."""
-    if data in (b"n", b"N", b"\r", b"\n", b"\x1b[C", b"\x1bOC"):
-        return KeyPress(Key.NEXT)
-    if data in (b"p", b"P", b"\x1b[D", b"\x1bOD"):
-        return KeyPress(Key.PREVIOUS)
-    if data in (b"g", b"G"):
-        return KeyPress(Key.JUMP)
-    if data == b" ":
-        return KeyPress(Key.TOGGLE_PLAYBACK)
-    if data in (b"q", b"Q", b"\x03", b"\x04"):
-        return KeyPress(Key.QUIT)
-    return KeyPress(Key.UNKNOWN, data.decode("utf-8", errors="replace"))
-
-
-def decode_line(line: str) -> KeyPress:
-    """Decode one command typed on a line: ``n``, ``p``, ``g`` or ``g NUMBER``, ``pause``, ``q``."""
-    text = line.strip().lower()
-    word, _, argument = text.partition(" ")
-    if word in ("", "n", "next"):
-        return KeyPress(Key.NEXT)
-    if word in ("p", "previous"):
-        return KeyPress(Key.PREVIOUS)
-    if word in ("g", "jump"):
-        return KeyPress(Key.JUMP, argument.strip() or None)
-    if word in ("pause", "play", "resume", "space"):
-        return KeyPress(Key.TOGGLE_PLAYBACK)
-    if word in ("q", "quit", "exit"):
-        return KeyPress(Key.QUIT)
-    return KeyPress(Key.UNKNOWN, text)
 
 
 class LineKeySource:
@@ -146,7 +222,7 @@ class TerminalKeySource:
         self._termios, self._tty = terminal_modules
         self._saved: list[object] | None = None
 
-    def __enter__(self) -> TerminalKeySource:
+    def __enter__(self) -> Self:
         descriptor = self._stream.fileno()
         self._saved = self._termios.tcgetattr(descriptor)
         self._tty.setcbreak(descriptor)
@@ -162,13 +238,16 @@ class TerminalKeySource:
         data = os.read(descriptor, 1)
         if not data:
             return KeyPress(Key.QUIT)
-        if data == b"\x1b":
-            data += self._read_escape_sequence(descriptor)
+        elif data == b"\x1b":
+            data += _read_escape_sequence(descriptor)
             if data == PASTE_START:
-                return self._read_paste(descriptor)
+                return KeyPress(Key.UNKNOWN, f"pasted text {_read_paste_text(descriptor)}")
+            else:
+                return decode_key(data)
         elif data[0] >= 0xC0:
-            data += self._read_continuation_bytes(descriptor, data[0])
-        return decode_key(data)
+            return decode_key(data + _read_continuation_bytes(descriptor, data[0]))
+        else:
+            return decode_key(data)
 
     def read_line(self, prompt: str) -> str | None:
         self._restore()
@@ -179,80 +258,76 @@ class TerminalKeySource:
             self._tty.setcbreak(self._stream.fileno(), self._termios.TCSANOW)
         return None if line == "" else line
 
-    def _read_escape_sequence(self, descriptor: int) -> bytes:
-        """Collect the bytes that follow an escape byte (an arrow key sends three in all)."""
-        collected = b""
-        while len(collected) < MAXIMUM_ESCAPE_BYTES:
-            if not select.select([descriptor], [], [], ESCAPE_WAIT_SECONDS)[0]:
-                break
-            byte = os.read(descriptor, 1)
-            collected += byte
-            if not byte or (len(collected) == 1 and byte not in (b"[", b"O")):
-                break
-            if len(collected) > 1 and 0x40 <= byte[0] <= 0x7E:
-                break
-        return collected
-
-    def _read_continuation_bytes(self, descriptor: int, lead: int) -> bytes:
-        """Collect the rest of a multi-byte UTF-8 character whose first byte is ``lead``."""
-        missing = 3 if lead >= 0xF0 else 2 if lead >= 0xE0 else 1
-        collected = b""
-        while len(collected) < missing:
-            if not select.select([descriptor], [], [], ESCAPE_WAIT_SECONDS)[0]:
-                break
-            byte = os.read(descriptor, 1)
-            if not byte:
-                break
-            collected += byte
-        return collected
-
-    def _read_paste(self, descriptor: int) -> KeyPress:
-        """Swallow a bracketed paste whole; it is one unknown key, whatever it contains."""
-        collected = b""
-        while not collected.endswith(PASTE_END) and len(collected) < MAXIMUM_PASTE_BYTES:
-            if not select.select([descriptor], [], [], PASTE_WAIT_SECONDS)[0]:
-                break
-            byte = os.read(descriptor, 1)
-            if not byte:
-                break
-            collected += byte
-        text = collected.removesuffix(PASTE_END).decode("utf-8", errors="replace")
-        if len(text) > MAXIMUM_SHOWN_PASTE_CHARACTERS:
-            text = text[:MAXIMUM_SHOWN_PASTE_CHARACTERS] + "..."
-        return KeyPress(Key.UNKNOWN, f"pasted text {text}")
-
     def _restore(self) -> None:
         if self._saved is not None:
             self._termios.tcsetattr(self._stream.fileno(), self._termios.TCSADRAIN, self._saved)
 
 
+def decode_key(data: bytes) -> KeyPress:
+    """Decode the bytes of one key press from a terminal.
+
+    Args:
+        data: The bytes the terminal sent for the key.
+
+    Returns:
+        The key press; an unknown key carries its text as the argument.
+    """
+    if data in (b"n", b"N", b"\r", b"\n", b"\x1b[C", b"\x1bOC"):
+        return KeyPress(Key.NEXT)
+    elif data in (b"p", b"P", b"\x1b[D", b"\x1bOD"):
+        return KeyPress(Key.PREVIOUS)
+    elif data in (b"g", b"G"):
+        return KeyPress(Key.JUMP)
+    elif data == b" ":
+        return KeyPress(Key.TOGGLE_PLAYBACK)
+    elif data in (b"q", b"Q", b"\x03", b"\x04"):
+        return KeyPress(Key.QUIT)
+    else:
+        return KeyPress(Key.UNKNOWN, data.decode("utf-8", errors="replace"))
+
+
+def decode_line(line: str) -> KeyPress:
+    """Decode one command typed on a line: ``n``, ``p``, ``g`` or ``g NUMBER``, ``pause``, ``q``.
+
+    Args:
+        line: The text typed, with or without the line break.
+
+    Returns:
+        The key press; a jump carries the text after ``g`` as the argument, and
+        an unknown command carries its text.
+    """
+    text = line.strip().lower()
+    word, _, argument = text.partition(" ")
+    if word in ("", "n", "next"):
+        return KeyPress(Key.NEXT)
+    elif word in ("p", "previous"):
+        return KeyPress(Key.PREVIOUS)
+    elif word in ("g", "jump"):
+        return KeyPress(Key.JUMP, argument.strip() or None)
+    elif word in ("pause", "play", "resume", "space"):
+        return KeyPress(Key.TOGGLE_PLAYBACK)
+    elif word in ("q", "quit", "exit"):
+        return KeyPress(Key.QUIT)
+    else:
+        return KeyPress(Key.UNKNOWN, text)
+
+
 @contextmanager
 def terminal_key_source(stream: TextIO | None = None) -> Iterator[KeySource]:
-    """Yield the best key source for ``stream`` (default: standard input).
+    """Provide the best key source for a stream.
 
     A terminal gets single-key input when the platform has ``termios``;
     anything else, such as a pipe, gets line input.
+
+    Args:
+        stream: The stream to read keys from (default: standard input).
+
+    Yields:
+        The key source, with the terminal restored when the block ends.
     """
     stream = stream if stream is not None else sys.stdin
-    modules = _terminal_modules()
-    if modules is not None and _is_terminal(stream):
-        with TerminalKeySource(stream, modules) as source:
+    if termios is not None and tty is not None and _is_terminal(stream):
+        with TerminalKeySource(stream, (termios, tty)) as source:
             yield source
     else:
         yield LineKeySource(stream)
-
-
-def _terminal_modules() -> tuple[ModuleType, ModuleType] | None:
-    try:
-        import termios
-        import tty
-    except ImportError:
-        return None
-    return termios, tty
-
-
-def _is_terminal(stream: TextIO) -> bool:
-    try:
-        return stream.isatty()
-    except ValueError:
-        return False

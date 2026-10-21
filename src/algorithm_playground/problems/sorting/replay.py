@@ -7,51 +7,13 @@ snapshots start from an array as long as the input. The replay itself is the
 generic :class:`~algorithm_playground.core.replay.StateTimeline`.
 """
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 
 from algorithm_playground.core.replay import DEFAULT_CHECKPOINT_INTERVAL, StateTimeline
 from algorithm_playground.problems.sorting.events import EventLog, SortingEvent
 from algorithm_playground.problems.sorting.trace import SortingTrace, start_values
 
-
-def sorting_timeline(
-    start: Sequence[int], events: EventLog
-) -> StateTimeline[tuple[int, ...], SortingEvent]:
-    """Return the timeline of the array ``start`` under ``events``.
-
-    A checkpoint is kept every ``max(256, len(start))`` events, which keeps the
-    memory proportional to the number of events while a lookup replays only a
-    short stretch.
-    """
-    return StateTimeline(
-        tuple(start),
-        events,
-        _apply_events,
-        checkpoint_interval=max(DEFAULT_CHECKPOINT_INTERVAL, len(start)),
-    )
-
-
-def replay_warnings(trace: SortingTrace, input_values: Sequence[int]) -> list[str]:
-    """Return what is inconsistent inside ``trace``, run on ``input_values``.
-
-    A first snapshot whose length differs from the input is reported. When the
-    trace also has events and at least two snapshots (the first is where the
-    replay starts, the last is what it must reach), the replayed events are
-    compared with the final snapshot and the first difference is reported.
-    """
-    warnings: list[str] = []
-    if trace.snapshots:
-        first, input_length = len(trace.snapshots[0]), len(input_values)
-        if first != input_length:
-            warnings.append(
-                f"The first snapshot has {first} values, but the input has {input_length}. "
-                "A snapshot should show the whole array."
-            )
-    if trace.events is not None and len(trace.snapshots) >= 2:
-        warnings.extend(_replay_difference(trace, trace.events, input_values))
-    return warnings
+__all__ = ["replay_warnings", "sorting_timeline"]
 
 
 def _apply_events(values: tuple[int, ...], events: Sequence[SortingEvent]) -> tuple[int, ...]:
@@ -61,9 +23,21 @@ def _apply_events(values: tuple[int, ...], events: Sequence[SortingEvent]) -> tu
     return tuple(updated)
 
 
-def _replay_difference(
+def _warn_about_first_snapshot(trace: SortingTrace, input_length: int) -> list[str]:
+    """Report a first snapshot whose length differs from the input."""
+    snapshot_length = len(trace.snapshots[0])
+    if snapshot_length == input_length:
+        return []
+    return [
+        f"The first snapshot has {snapshot_length} values, but the input has {input_length}. "
+        "A snapshot should show the whole array."
+    ]
+
+
+def _warn_about_replay(
     trace: SortingTrace, events: EventLog, input_values: Sequence[int]
 ) -> list[str]:
+    """Report the first difference between the replayed events and the final snapshot."""
     replayed = sorting_timeline(start_values(trace, input_values), events).final_state
     final = trace.snapshots[-1]
     if replayed == final:
@@ -76,9 +50,57 @@ def _replay_difference(
         return [
             f"{prefix}: the replayed array has {len(replayed)} values, the snapshot {len(final)}."
         ]
-    position = next(index for index in range(len(final)) if replayed[index] != final[index])
-    return [
-        f"{prefix}: first difference at index {position} (replayed {replayed[position]}, "
-        f"snapshot {final[position]}). The events and the snapshots disagree, so one of "
-        "them is recorded wrongly."
-    ]
+    else:
+        position = next(index for index in range(len(final)) if replayed[index] != final[index])
+        return [
+            f"{prefix}: first difference at index {position} (replayed {replayed[position]}, "
+            f"snapshot {final[position]}). The events and the snapshots disagree, so one of "
+            "them is recorded wrongly."
+        ]
+
+
+def sorting_timeline(
+    start: Sequence[int], events: EventLog
+) -> StateTimeline[tuple[int, ...], SortingEvent]:
+    """Build the timeline of an array under a sequence of events.
+
+    A checkpoint is kept every ``max(256, len(start))`` events, which keeps the
+    memory proportional to the number of events while a lookup replays only a
+    short stretch.
+
+    Args:
+        start: The array before the first event.
+        events: The events to replay.
+
+    Returns:
+        A timeline that gives the array after any number of events.
+    """
+    return StateTimeline(
+        tuple(start),
+        events,
+        _apply_events,
+        checkpoint_interval=max(DEFAULT_CHECKPOINT_INTERVAL, len(start)),
+    )
+
+
+def replay_warnings(trace: SortingTrace, input_values: Sequence[int]) -> list[str]:
+    """Report what is inconsistent inside a trace.
+
+    A first snapshot whose length differs from the input is reported. When the
+    trace also has events and at least two snapshots (the first is where the
+    replay starts, the last is what it must reach), the replayed events are
+    compared with the final snapshot and the first difference is reported.
+
+    Args:
+        trace: The trace to check.
+        input_values: The input of the run that recorded the trace.
+
+    Returns:
+        One message for each inconsistency; empty when the trace is consistent.
+    """
+    warnings: list[str] = []
+    if trace.snapshots:
+        warnings.extend(_warn_about_first_snapshot(trace, len(input_values)))
+    if trace.events is not None and len(trace.snapshots) >= 2:
+        warnings.extend(_warn_about_replay(trace, trace.events, input_values))
+    return warnings

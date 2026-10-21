@@ -6,64 +6,30 @@ return a chart as text, which is what a problem puts in a frame;
 :func:`line_chart` prints a chart to standard output.
 """
 
-from __future__ import annotations
-
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from enum import Enum
 
 import plotext
+
+__all__ = [
+    "BAR_WIDTH",
+    "GAP_COLUMNS",
+    "MAXIMUM_BAR_LABELS",
+    "PLAIN_BAR_COLOR",
+    "AxisScale",
+    "BarHighlight",
+    "ChartSeries",
+    "line_chart",
+    "render_bar_chart",
+    "render_side_by_side_bar_charts",
+]
 
 PLAIN_BAR_COLOR = "blue"
 GAP_COLUMNS = 2
 BAR_WIDTH = 4 / 5
 MAXIMUM_BAR_LABELS = 20
-
-
-@dataclass(frozen=True)
-class BarHighlight:
-    """Bars drawn in another color, with a legend entry saying why."""
-
-    indices: tuple[int, ...]
-    color: str
-    label: str
-
-
-def render_bar_chart(
-    values: Sequence[int | float],
-    *,
-    title: str,
-    highlights: Sequence[BarHighlight] = (),
-    width: int | None = None,
-    height: int | None = None,
-) -> str:
-    """Return a bar chart of ``values`` as text with terminal color codes.
-
-    A bar named by several highlights takes the color of the first one, and
-    an index outside the values is ignored. ``width`` and ``height`` are the
-    number of text columns and lines of the whole chart (default: the size of
-    the terminal).
-    """
-    plotext.clear_figure()
-    if width is not None or height is not None:
-        plotext.plotsize(width or plotext.terminal_width(), height or plotext.terminal_height())
-    count = len(values)
-    claimed: set[int] = set()
-    highlighted: list[tuple[list[int], BarHighlight]] = []
-    for highlight in highlights:
-        chosen = sorted(index for index in set(highlight.indices) - claimed if 0 <= index < count)
-        claimed.update(chosen)
-        if chosen:
-            highlighted.append((chosen, highlight))
-    _draw_bars(values, [index for index in range(count) if index not in claimed], PLAIN_BAR_COLOR)
-    for chosen, highlight in highlighted:
-        _draw_bars(values, chosen, highlight.color, label=highlight.label)
-    if count:
-        plotext.xlim(-0.5, count - 0.5)
-        plotext.xticks(list(range(0, count, math.ceil(count / MAXIMUM_BAR_LABELS))))
-    plotext.title(title)
-    plotext.theme("clear")
-    return plotext.build()
 
 
 def _draw_bars(
@@ -84,38 +50,44 @@ def _draw_bars(
     plotext.bar(positions, [values[index] for index in positions], color=color, **options)
 
 
-def render_side_by_side_bar_charts(
-    left_values: Sequence[int | float],
-    right_values: Sequence[int | float],
-    *,
-    left_title: str,
-    right_title: str,
-    height: int | None = None,
-    highlights: Sequence[BarHighlight] = (),
-) -> str:
-    """Return two bar charts next to each other as text with terminal color codes.
+def _claim_bars(count: int, index_groups: Sequence[Iterable[int]]) -> list[list[int]]:
+    """Give every bar to the first group that names it, dropping indices outside the bars.
 
-    ``height`` is the number of text lines of each chart (default: the height of
-    the terminal) and ``highlights`` are drawn in both charts, as in
-    :func:`render_bar_chart`. Each chart is drawn on its own, because plotext
-    carries the axis limits of a subplot figure over to the next one and can
-    then fail to finish.
+    Returns:
+        The sorted bars each group claimed, in the order of the groups.
     """
-    width = (plotext.terminal_width() - GAP_COLUMNS) // 2
-    left = render_bar_chart(
-        left_values, title=left_title, highlights=highlights, width=width, height=height
-    ).splitlines()
-    right = render_bar_chart(
-        right_values, title=right_title, highlights=highlights, width=width, height=height
-    ).splitlines()
-    return "\n".join(
-        f"{one}{' ' * GAP_COLUMNS}{other}" for one, other in zip(left, right, strict=True)
-    )
+    claimed: set[int] = set()
+    claims: list[list[int]] = []
+    for group in index_groups:
+        chosen = sorted(index for index in set(group) - claimed if 0 <= index < count)
+        claimed.update(chosen)
+        claims.append(chosen)
+    return claims
+
+
+class AxisScale(Enum):
+    """How the values of one axis of a line chart are spaced."""
+
+    LINEAR = "linear"
+    LOGARITHMIC = "logarithmic"
+
+
+@dataclass(frozen=True)
+class BarHighlight:
+    """Bars drawn in another color, with a legend entry saying why."""
+
+    indices: tuple[int, ...]
+    color: str
+    label: str
 
 
 @dataclass(frozen=True)
 class ChartSeries:
-    """One named line of a line chart."""
+    """One named line of a line chart.
+
+    Raises:
+        ValueError: If there are not as many y values as x values.
+    """
 
     name: str
     x_values: tuple[int | float, ...]
@@ -129,25 +101,115 @@ class ChartSeries:
             )
 
 
+def render_bar_chart(
+    values: Sequence[int | float],
+    *,
+    title: str,
+    highlights: Sequence[BarHighlight] = (),
+    width: int | None = None,
+    height: int | None = None,
+) -> str:
+    """Draw a bar chart as text with terminal color codes.
+
+    A bar named by several highlights takes the color of the first one, and
+    an index outside the values is ignored.
+
+    Args:
+        values: The height of each bar.
+        title: The title above the chart.
+        highlights: Bars to draw in another color, each with a legend entry.
+        width: The number of text columns of the whole chart (default: the
+            width of the terminal).
+        height: The number of text lines of the whole chart (default: the
+            height of the terminal).
+
+    Returns:
+        The chart.
+    """
+    plotext.clear_figure()
+    if width is not None or height is not None:
+        plotext.plotsize(width or plotext.terminal_width(), height or plotext.terminal_height())
+    count = len(values)
+    claims = _claim_bars(count, [highlight.indices for highlight in highlights])
+    claimed = {index for chosen in claims for index in chosen}
+    _draw_bars(values, [index for index in range(count) if index not in claimed], PLAIN_BAR_COLOR)
+    for chosen, highlight in zip(claims, highlights, strict=True):
+        _draw_bars(values, chosen, highlight.color, label=highlight.label)
+    if count:
+        plotext.xlim(-0.5, count - 0.5)
+        plotext.xticks(list(range(0, count, math.ceil(count / MAXIMUM_BAR_LABELS))))
+    plotext.title(title)
+    plotext.theme("clear")
+    return plotext.build()
+
+
+def render_side_by_side_bar_charts(
+    left_values: Sequence[int | float],
+    right_values: Sequence[int | float],
+    *,
+    left_title: str,
+    right_title: str,
+    height: int | None = None,
+    highlights: Sequence[BarHighlight] = (),
+) -> str:
+    """Draw two bar charts next to each other as text with terminal color codes.
+
+    Each chart is drawn on its own, because plotext carries the axis limits of
+    a subplot figure over to the next one and can then fail to finish.
+
+    Args:
+        left_values: The height of each bar of the left chart.
+        right_values: The height of each bar of the right chart.
+        left_title: The title above the left chart.
+        right_title: The title above the right chart.
+        height: The number of text lines of each chart (default: the height of
+            the terminal).
+        highlights: Bars to draw in another color in both charts, as in
+            :func:`render_bar_chart`.
+
+    Returns:
+        The two charts, each half the width of the terminal.
+    """
+    width = (plotext.terminal_width() - GAP_COLUMNS) // 2
+    left = render_bar_chart(
+        left_values, title=left_title, highlights=highlights, width=width, height=height
+    ).splitlines()
+    right = render_bar_chart(
+        right_values, title=right_title, highlights=highlights, width=width, height=height
+    ).splitlines()
+    return "\n".join(
+        f"{one}{' ' * GAP_COLUMNS}{other}" for one, other in zip(left, right, strict=True)
+    )
+
+
 def line_chart(
     series: Sequence[ChartSeries],
     *,
     title: str,
     x_label: str,
     y_label: str,
-    logarithmic_x: bool = False,
-    logarithmic_y: bool = False,
+    x_scale: AxisScale = AxisScale.LINEAR,
+    y_scale: AxisScale = AxisScale.LINEAR,
 ) -> None:
-    """Render every series as a line on one chart, with a legend naming them."""
+    """Print every series as a line on one chart to standard output, with a legend naming them.
+
+    Args:
+        series: The lines to draw.
+        title: The title above the chart.
+        x_label: The label of the x axis.
+        y_label: The label of the y axis.
+        x_scale: How the x axis is spaced.
+        y_scale: How the y axis is spaced.
+    """
     plotext.clear_figure()
     for line in series:
         plotext.plot(list(line.x_values), list(line.y_values), marker="braille", label=line.name)
     plotext.title(title)
     plotext.xlabel(x_label)
     plotext.ylabel(y_label)
-    if logarithmic_x:
+    if x_scale is AxisScale.LOGARITHMIC:
         plotext.xscale("log")
-    if logarithmic_y:
+    if y_scale is AxisScale.LOGARITHMIC:
         plotext.yscale("log")
     plotext.theme("clear")
     plotext.show()

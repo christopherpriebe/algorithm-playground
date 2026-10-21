@@ -4,15 +4,13 @@ Timings come from in-process fake runners with fixed durations, so the numbers
 in the tables are exact and nothing here depends on how fast the machine is.
 """
 
-from __future__ import annotations
-
 import json
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from fakes import FakeRunners, crash, sort_correctly
-from support import Invoke, TableRows, assert_exits_with
+from helpers.fakes import FakeRunners, crash, sort_correctly
+from helpers.support import assert_exits_with, find_table_header, invoke_cli, parse_table_rows
 from typer.testing import Result
 
 from algorithm_playground.cli import benchmark_rendering
@@ -22,24 +20,28 @@ pytestmark = pytest.mark.integration
 
 UseFakeRunners = Callable[..., FakeRunners]
 
-FAST = 0.010
-SLOW = 0.050
+FAST_SECONDS = 0.010
+SLOW_SECONDS = 0.050
 
 
-def quadratic(values: list[int]) -> float:
+def compute_quadratic_seconds(values: list[int]) -> float:
+    """Return a duration that grows with the square of the input size, above a startup time."""
     return 0.010 + 1e-6 * len(values) ** 2
 
 
-def linear(values: list[int]) -> float:
+def compute_linear_seconds(values: list[int]) -> float:
+    """Return a duration that grows linearly with the input size, above a startup time."""
     return 0.010 + 1e-4 * len(values)
 
 
-def mostly_startup(values: list[int]) -> float:
+def compute_mostly_startup_seconds(values: list[int]) -> float:
+    """Return a duration dominated by the startup time, growing only slightly with the size."""
     return 0.010 + 1e-9 * len(values) ** 2
 
 
-def benchmark(invoke: Invoke, *arguments: str, sizes: str = "4,8") -> Result:
-    return invoke(
+def invoke_benchmark(*arguments: str, sizes: str = "4,8") -> Result:
+    """Benchmark the implementations with one repetition per size and no plot."""
+    return invoke_cli(
         "benchmark",
         "sorting",
         *arguments,
@@ -53,63 +55,89 @@ def benchmark(invoke: Invoke, *arguments: str, sizes: str = "4,8") -> Result:
     )
 
 
+def invoke_benchmark_with_plot(*arguments: str) -> Result:
+    """Benchmark the implementations on three sizes, leaving the plot enabled."""
+    return invoke_cli(
+        "benchmark",
+        "sorting",
+        *arguments,
+        "--sizes",
+        "10,100,1000",
+        "--repetitions",
+        "1",
+        "--warmup",
+        "0",
+    )
+
+
 class TestRatios:
-    def test_the_second_implementation_is_compared_to_the_first(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
-    ) -> None:
+    @pytest.fixture
+    def fast_and_slow(self, use_fake_runners: UseFakeRunners) -> None:
+        """Fake runners for a fast and a slow implementation."""
         use_fake_runners(
-            {"fast": sort_correctly, "slow": sort_correctly}, {"fast": FAST, "slow": SLOW}
+            {"fast": sort_correctly, "slow": sort_correctly},
+            {"fast": FAST_SECONDS, "slow": SLOW_SECONDS},
         )
-        result = benchmark(invoke, "--command", "fast", "--command", "slow")
+
+    @pytest.mark.usefixtures("fast_and_slow")
+    def test_the_second_implementation_is_compared_to_the_first(self) -> None:
+        """Test the median of each implementation is shown with its ratio to the first."""
+        result = invoke_benchmark("--command", "fast", "--command", "slow")
+
         assert result.exit_code == 0, result.stdout
         assert "median in ms, ratio to fast" in result.stdout
-        assert table_rows(result.stdout) == [
+        assert parse_table_rows(result.stdout) == [
             ["startup", "10.000 (1.00x)", "50.000 (5.00x)"],
             ["4", "10.000 (1.00x)", "50.000 (5.00x)"],
             ["8", "10.000 (1.00x)", "50.000 (5.00x)"],
         ]
 
-    def test_a_non_first_reference_becomes_the_denominator(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
-    ) -> None:
-        use_fake_runners(
-            {"fast": sort_correctly, "slow": sort_correctly}, {"fast": FAST, "slow": SLOW}
-        )
-        result = benchmark(invoke, "--command", "fast", "--command", "slow", "--reference", "slow")
+    @pytest.mark.usefixtures("fast_and_slow")
+    def test_a_non_first_reference_becomes_the_denominator(self) -> None:
+        """Test the reference option chooses the implementation the ratios are relative to."""
+        result = invoke_benchmark("--command", "fast", "--command", "slow", "--reference", "slow")
+
         assert result.exit_code == 0, result.stdout
         assert "ratio to slow" in result.stdout
-        assert table_rows(result.stdout)[1:] == [
+        assert parse_table_rows(result.stdout)[1:] == [
             ["4", "10.000 (0.20x)", "50.000 (1.00x)"],
             ["8", "10.000 (0.20x)", "50.000 (1.00x)"],
         ]
 
     def test_the_ratio_is_left_out_when_the_reference_took_no_measurable_time(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
+        """Test no ratio is shown when the reference took no time."""
         use_fake_runners({"zero": sort_correctly, "other": sort_correctly}, {"zero": 0.0})
-        result = benchmark(invoke, "--command", "zero", "--command", "other")
+
+        result = invoke_benchmark("--command", "zero", "--command", "other")
+
         assert result.exit_code == 0, result.stdout
-        assert table_rows(result.stdout)[1] == ["4", "0.000", "1.000"]
+        assert parse_table_rows(result.stdout)[1] == ["4", "0.000", "1.000"]
 
 
 class TestDistributionOption:
     def test_the_default_generator_alone_is_measured_and_named_in_the_title(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        use_fake_runners({"a": sort_correctly, "b": sort_correctly})
-        result = benchmark(invoke, "--command", "a", "--command", "b")
+        """Test without the option the default distribution is named in the title only."""
+        use_fake_runners({"first": sort_correctly, "second": sort_correctly})
+
+        result = invoke_benchmark("--command", "first", "--command", "second")
+
         assert result.exit_code == 0, result.stdout
-        assert "median in ms, ratio to a" in result.stdout
+        assert "median in ms, ratio to first" in result.stdout
         assert "distribution: uniform" in result.stdout
-        assert "distribution " not in next(
-            line for line in result.stdout.splitlines() if line.startswith("┃")
-        )
+        assert "distribution " not in find_table_header(result.stdout)
 
     def test_an_unknown_distribution_is_a_usage_error_before_anything_runs(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        runners = use_fake_runners({"a": sort_correctly})
-        result = benchmark(invoke, "--command", "a", "--distribution", "nope")
+        """Test an unknown distribution lists the known ones and runs nothing."""
+        runners = use_fake_runners({"sorter": sort_correctly})
+
+        result = invoke_benchmark("--command", "sorter", "--distribution", "nope")
+
         assert_exits_with(result, 2)
         assert "Unknown distribution 'nope'" in result.stderr
         assert "median_of_three_killer" in result.stderr
@@ -117,13 +145,15 @@ class TestDistributionOption:
         assert runners.calls == []
 
     def test_several_distributions_share_one_table_with_a_header_row_each(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
+        """Test measuring several distributions gives one table with a section per distribution."""
         use_fake_runners(
-            {"fast": sort_correctly, "slow": sort_correctly}, {"fast": FAST, "slow": SLOW}
+            {"fast": sort_correctly, "slow": sort_correctly},
+            {"fast": FAST_SECONDS, "slow": SLOW_SECONDS},
         )
-        result = benchmark(
-            invoke,
+
+        result = invoke_benchmark(
             "--command",
             "fast",
             "--command",
@@ -133,12 +163,12 @@ class TestDistributionOption:
             "--distribution",
             "few_unique",
         )
+
         assert result.exit_code == 0, result.stdout
-        header = next(line for line in result.stdout.splitlines() if line.startswith("┃"))
-        assert "distribution" not in header
+        assert "distribution" not in find_table_header(result.stdout)
         assert "median in ms, ratio to fast" in result.stdout
         assert "distribution:" not in result.stdout
-        assert table_rows(result.stdout) == [
+        assert parse_table_rows(result.stdout) == [
             ["startup", "10.000 (1.00x)", "50.000 (5.00x)"],
             ["sorted", "", ""],
             ["4", "10.000 (1.00x)", "50.000 (5.00x)"],
@@ -149,35 +179,41 @@ class TestDistributionOption:
         ]
 
     def test_a_repeated_distribution_is_measured_once(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        runners = use_fake_runners({"a": sort_correctly})
-        result = benchmark(
-            invoke, "--command", "a", "--distribution", "sorted", "--distribution", "sorted"
+        """Test a distribution named twice is measured once."""
+        runners = use_fake_runners({"sorter": sort_correctly})
+
+        result = invoke_benchmark(
+            "--command", "sorter", "--distribution", "sorted", "--distribution", "sorted"
         )
+
         assert result.exit_code == 0, result.stdout
-        assert [row[0] for row in table_rows(result.stdout)] == ["startup", "4", "8"]
+        assert [row[0] for row in parse_table_rows(result.stdout)] == ["startup", "4", "8"]
         assert len(runners.calls) == 1 + 2  # the startup, and one run per size
 
-    def test_the_adversary_is_selectable_by_name(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners
-    ) -> None:
-        runners = use_fake_runners({"a": sort_correctly})
-        result = benchmark(invoke, "--command", "a", "--distribution", "median_of_three_killer")
+    def test_the_adversary_is_selectable_by_name(self, use_fake_runners: UseFakeRunners) -> None:
+        """Test the median-of-three adversary can be chosen as the distribution."""
+        runners = use_fake_runners({"sorter": sort_correctly})
+
+        result = invoke_benchmark("--command", "sorter", "--distribution", "median_of_three_killer")
+
         assert result.exit_code == 0, result.stdout
-        _, small, large = runners.inputs_of("a")
+        _, small, large = runners.collect_inputs_of("sorter")
         assert len(small) == 4
         assert [sorted(large).index(value) + 1 for value in large] == [1, 5, 3, 7, 2, 4, 6, 8]
 
     def test_a_failure_in_one_distribution_is_reported_with_its_name(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
+        """Test a failed size names its distribution and the other distribution still runs."""
+
         def fail_on_sorted_input(values: list[int]) -> list[int]:
             return crash(values) if values == sorted(values) and len(values) > 3 else sorted(values)
 
         use_fake_runners({"picky": fail_on_sorted_input, "steady": sort_correctly})
-        result = benchmark(
-            invoke,
+
+        result = invoke_benchmark(
             "--command",
             "picky",
             "--command",
@@ -187,12 +223,13 @@ class TestDistributionOption:
             "--distribution",
             "uniform",
         )
+
         assert_exits_with(result, 1)
         assert "picky failed:" in result.stdout
         assert "size 4 (sorted)" in result.stdout
         picky_cells: dict[tuple[str, str], str] = {}
         section = ""
-        for row in table_rows(result.stdout):
+        for row in parse_table_rows(result.stdout):
             if row[0] in ("sorted", "uniform"):
                 section = row[0]
             elif section:
@@ -205,7 +242,7 @@ class TestDistributionOption:
             ("uniform", "4"): "1.000",
             ("uniform", "8"): "1.000",
         }
-        steady_cells = [row[2] for row in table_rows(result.stdout)[1:]]
+        steady_cells = [row[2] for row in parse_table_rows(result.stdout)[1:]]
         assert "failed" not in steady_cells and "skipped" not in steady_cells
 
 
@@ -213,14 +250,15 @@ class TestGrowthRows:
     SIZES = "100,200,400,800"
 
     def test_a_comparison_shows_a_growth_row_per_distribution(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
+        """Test the last row of a comparison gives the growth class of each implementation."""
         use_fake_runners(
             {"flat": sort_correctly, "steep": sort_correctly},
-            {"flat": linear, "steep": quadratic},
+            {"flat": compute_linear_seconds, "steep": compute_quadratic_seconds},
         )
-        result = benchmark(
-            invoke,
+
+        result = invoke_benchmark(
             "--command",
             "flat",
             "--command",
@@ -228,18 +266,20 @@ class TestGrowthRows:
             "--subtract-startup-time",
             sizes=self.SIZES,
         )
+
         assert result.exit_code == 0, result.stdout
-        assert table_rows(result.stdout)[-1] == ["growth", "~ n (n^1.00)", "~ n^2 (n^2.00)"]
+        assert parse_table_rows(result.stdout)[-1] == ["growth", "~ n (n^1.00)", "~ n^2 (n^2.00)"]
 
     def test_a_single_implementation_shows_the_exponent_under_its_median(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        use_fake_runners({"steep": sort_correctly}, {"steep": quadratic})
-        result = benchmark(
-            invoke, "--command", "steep", "--subtract-startup-time", sizes=self.SIZES
-        )
+        """Test the growth of a lone implementation is shown under its median column."""
+        use_fake_runners({"steep": sort_correctly}, {"steep": compute_quadratic_seconds})
+
+        result = invoke_benchmark("--command", "steep", "--subtract-startup-time", sizes=self.SIZES)
+
         assert result.exit_code == 0, result.stdout
-        assert table_rows(result.stdout)[-1] == ["growth", "", "~ n^2 (n^2.00)", "", ""]
+        assert parse_table_rows(result.stdout)[-1] == ["growth", "", "~ n^2 (n^2.00)", "", ""]
 
     @pytest.mark.parametrize(
         "options",
@@ -248,54 +288,66 @@ class TestGrowthRows:
     )
     def test_the_growth_excludes_the_startup_time_either_way(
         self,
-        invoke: Invoke,
         use_fake_runners: UseFakeRunners,
-        table_rows: TableRows,
         options: list[str],
     ) -> None:
-        use_fake_runners({"steep": sort_correctly}, {"steep": mostly_startup})
-        result = benchmark(invoke, "--command", "steep", *options, sizes=self.SIZES)
-        growth = table_rows(result.stdout)[-1][2]
+        """Test the estimated growth ignores the startup time whether or not it is subtracted."""
+        use_fake_runners({"steep": sort_correctly}, {"steep": compute_mostly_startup_seconds})
+
+        result = invoke_benchmark("--command", "steep", *options, sizes=self.SIZES)
+
+        growth = parse_table_rows(result.stdout)[-1][2]
         exponent = float(growth[growth.index("(n^") + 3 : growth.index(")")])
         assert exponent == pytest.approx(2.0, abs=0.05)
 
     def test_a_series_that_is_mostly_startup_is_starred_and_explained(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        use_fake_runners({"quick": sort_correctly}, {"quick": mostly_startup})
-        result = benchmark(invoke, "--command", "quick", sizes=self.SIZES)
+        """Test an unreliable growth estimate is starred and a note explains why."""
+        use_fake_runners({"quick": sort_correctly}, {"quick": compute_mostly_startup_seconds})
+
+        result = invoke_benchmark("--command", "quick", sizes=self.SIZES)
+
         assert result.exit_code == 0, result.stdout
-        assert table_rows(result.stdout)[-1][2].endswith(")*")
+        assert parse_table_rows(result.stdout)[-1][2].endswith(")*")
         assert "* The medians of this series are too close to the startup time" in result.stdout
 
     def test_a_series_well_above_the_startup_is_not_starred(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        use_fake_runners({"steep": sort_correctly}, {"steep": quadratic})
-        result = benchmark(invoke, "--command", "steep", sizes=self.SIZES)
-        assert "*" not in table_rows(result.stdout)[-1][2]
+        """Test a reliable growth estimate is neither starred nor explained."""
+        use_fake_runners({"steep": sort_correctly}, {"steep": compute_quadratic_seconds})
+
+        result = invoke_benchmark("--command", "steep", sizes=self.SIZES)
+
+        assert "*" not in parse_table_rows(result.stdout)[-1][2]
         assert "too close to the startup time" not in result.stdout
 
     def test_there_is_no_growth_row_with_fewer_than_three_sizes(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        use_fake_runners({"a": sort_correctly}, {"a": quadratic})
-        result = benchmark(invoke, "--command", "a", sizes="100,200")
+        """Test no growth is estimated from fewer than three sizes."""
+        use_fake_runners({"sorter": sort_correctly}, {"sorter": compute_quadratic_seconds})
+
+        result = invoke_benchmark("--command", "sorter", sizes="100,200")
+
         assert "growth" not in result.stdout
         assert "n^" not in result.stdout
 
     def test_each_distribution_gets_its_own_growth_row_and_unavailable_cells_are_dashes(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, table_rows: TableRows
+        self, use_fake_runners: UseFakeRunners
     ) -> None:
-        def flaky(values: list[int]) -> list[int]:
+        """Test every distribution has a growth row, with a dash for an implementation that failed."""
+
+        def fail_for_large_inputs(values: list[int]) -> list[int]:
             return crash(values) if len(values) > 200 else sorted(values)
 
         use_fake_runners(
-            {"steep": sort_correctly, "flaky": flaky},
-            {"steep": quadratic, "flaky": quadratic},
+            {"steep": sort_correctly, "flaky": fail_for_large_inputs},
+            {"steep": compute_quadratic_seconds, "flaky": compute_quadratic_seconds},
         )
-        result = benchmark(
-            invoke,
+
+        result = invoke_benchmark(
             "--command",
             "steep",
             "--command",
@@ -307,8 +359,9 @@ class TestGrowthRows:
             "--subtract-startup-time",
             sizes=self.SIZES,
         )
+
         assert result.exit_code == 1, result.stdout
-        growth_rows = [row for row in table_rows(result.stdout) if row[0] == "growth"]
+        growth_rows = [row for row in parse_table_rows(result.stdout) if row[0] == "growth"]
         assert growth_rows == [
             ["growth", "~ n^2 (n^2.00)", "-"],
             ["growth", "~ n^2 (n^2.00)", "-"],
@@ -316,16 +369,28 @@ class TestGrowthRows:
 
 
 class TestReportAndPlot:
+    @pytest.fixture
+    def plotted(self, monkeypatch: pytest.MonkeyPatch) -> list[ChartSeries]:
+        """The series that get plotted; the output counts as a terminal, which a plot needs."""
+        series: list[ChartSeries] = []
+
+        def capture(lines: list[ChartSeries], **keywords: object) -> None:
+            series.extend(lines)
+
+        monkeypatch.setattr(benchmark_rendering, "line_chart", capture)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        return series
+
     def test_the_json_report_records_distributions_and_growth(
         self,
-        invoke: Invoke,
         use_fake_runners: UseFakeRunners,
         tmp_path: Path,
     ) -> None:
-        use_fake_runners({"steep": sort_correctly}, {"steep": quadratic})
+        """Test the JSON report records every distribution, its results, and its growth."""
+        use_fake_runners({"steep": sort_correctly}, {"steep": compute_quadratic_seconds})
         json_path = tmp_path / "report.json"
-        result = benchmark(
-            invoke,
+
+        result = invoke_benchmark(
             "--command",
             "steep",
             "--distribution",
@@ -337,6 +402,7 @@ class TestReportAndPlot:
             str(json_path),
             sizes="100,200,400",
         )
+
         assert result.exit_code == 0, result.stdout
         report = json.loads(json_path.read_text())
         assert report["report"] == "benchmark"
@@ -359,74 +425,63 @@ class TestReportAndPlot:
             for distribution in ("sorted", "all_equal")
         }
 
-    @pytest.fixture
-    def plotted(self, monkeypatch: pytest.MonkeyPatch) -> list[ChartSeries]:
-        """The series that get plotted; the output counts as a terminal, which a plot needs."""
-        series: list[ChartSeries] = []
-
-        def capture(lines: list[ChartSeries], **keywords: object) -> None:
-            series.extend(lines)
-
-        monkeypatch.setattr(benchmark_rendering, "line_chart", capture)
-        monkeypatch.setenv("FORCE_COLOR", "1")
-        return series
-
     def test_no_plot_is_drawn_when_the_output_is_not_a_terminal(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, monkeypatch: pytest.MonkeyPatch
+        self, use_fake_runners: UseFakeRunners, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Test the chart is skipped, and no color codes are written, when not on a terminal."""
         drawn: list[object] = []
         monkeypatch.setattr(
             benchmark_rendering,
             "line_chart",
             lambda *arguments, **keywords: drawn.append(arguments),
         )
-        use_fake_runners({"a": sort_correctly}, {"a": linear})
-        result = self.plot(invoke, "--command", "a")
+        use_fake_runners({"sorter": sort_correctly}, {"sorter": compute_linear_seconds})
+
+        result = invoke_benchmark_with_plot("--command", "sorter")
+
         assert result.exit_code == 0, result.stdout
         assert drawn == []
         assert "\x1b[" not in result.stdout
 
-    def plot(self, invoke: Invoke, *arguments: str) -> Result:
-        return invoke(
-            "benchmark",
-            "sorting",
-            *arguments,
-            "--sizes",
-            "10,100,1000",
-            "--repetitions",
-            "1",
-            "--warmup",
-            "0",
+    def test_one_distribution_labels_the_series_with_the_implementation_only(
+        self, use_fake_runners: UseFakeRunners, plotted: list[ChartSeries]
+    ) -> None:
+        """Test the plot has one series per implementation, named after it."""
+        use_fake_runners(
+            {"first": sort_correctly, "second": sort_correctly},
+            {"first": compute_linear_seconds, "second": compute_quadratic_seconds},
         )
 
-    def test_one_distribution_labels_the_series_with_the_implementation_only(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, plotted: list[ChartSeries]
-    ) -> None:
-        use_fake_runners({"a": sort_correctly, "b": sort_correctly}, {"a": linear, "b": quadratic})
-        result = self.plot(invoke, "--command", "a", "--command", "b")
+        result = invoke_benchmark_with_plot("--command", "first", "--command", "second")
+
         assert result.exit_code == 0, result.stdout
-        assert [line.name for line in plotted] == ["a", "b"]
+        assert [line.name for line in plotted] == ["first", "second"]
 
     def test_several_distributions_draw_one_series_per_implementation_and_distribution(
-        self, invoke: Invoke, use_fake_runners: UseFakeRunners, plotted: list[ChartSeries]
+        self, use_fake_runners: UseFakeRunners, plotted: list[ChartSeries]
     ) -> None:
-        use_fake_runners({"a": sort_correctly, "b": sort_correctly}, {"a": linear, "b": quadratic})
-        result = self.plot(
-            invoke,
+        """Test the plot has a series for every pair of implementation and distribution."""
+        use_fake_runners(
+            {"first": sort_correctly, "second": sort_correctly},
+            {"first": compute_linear_seconds, "second": compute_quadratic_seconds},
+        )
+
+        result = invoke_benchmark_with_plot(
             "--command",
-            "a",
+            "first",
             "--command",
-            "b",
+            "second",
             "--distribution",
             "sorted",
             "--distribution",
             "reversed",
         )
+
         assert result.exit_code == 0, result.stdout
         assert [line.name for line in plotted] == [
-            "a (sorted)",
-            "a (reversed)",
-            "b (sorted)",
-            "b (reversed)",
+            "first (sorted)",
+            "first (reversed)",
+            "second (sorted)",
+            "second (reversed)",
         ]
         assert all(line.x_values == (10, 100, 1000) for line in plotted)

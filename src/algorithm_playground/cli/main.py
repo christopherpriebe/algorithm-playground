@@ -1,11 +1,9 @@
 """Top-level Typer application that wires up the subcommands."""
 
-from __future__ import annotations
-
 import functools
 import sys
 from collections.abc import Callable
-from typing import Annotated, Any
+from typing import Annotated, ParamSpec, TypeVar
 
 import typer
 from rich.console import Console
@@ -22,7 +20,12 @@ from algorithm_playground.cli.list_command import list_command
 from algorithm_playground.cli.test_command import test_command
 from algorithm_playground.core.hooks import HookError
 
+__all__ = ["INTERRUPTED_EXIT_CODE", "app"]
+
 INTERRUPTED_EXIT_CODE = 130
+
+CommandParameters = ParamSpec("CommandParameters")
+CommandResult = TypeVar("CommandResult")
 
 app = typer.Typer(
     name="algorithm-playground",
@@ -57,16 +60,26 @@ def _main(
     """Options that apply to every command."""
 
 
-def _end_cleanly(command: Callable[..., Any]) -> Callable[..., Any]:
-    """Make ``command`` end with a message and an exit code where it would end with a traceback.
+def _end_cleanly(
+    command: Callable[CommandParameters, CommandResult],
+) -> Callable[CommandParameters, CommandResult]:
+    """Make a command end with a message and an exit code where it would end with a traceback.
 
     Ctrl-C ends it with exit code 130, the shell convention. A hook of the
     problem that raises where no command guarded it, for example while the cases
     are generated, ends it with the hook's name and exit code 1.
+
+    Args:
+        command: The command function to wrap.
+
+    Returns:
+        A function with the signature of ``command`` that exits instead of raising.
     """
 
     @functools.wraps(command)
-    def run(*arguments: Any, **keywords: Any) -> Any:
+    def run(
+        *arguments: CommandParameters.args, **keywords: CommandParameters.kwargs
+    ) -> CommandResult:
         try:
             return command(*arguments, **keywords)
         except KeyboardInterrupt:

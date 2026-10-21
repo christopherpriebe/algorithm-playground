@@ -10,12 +10,12 @@ The command-line front end reports that error and ends with the failure exit
 code.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import TypeVar
 
-from algorithm_playground.core._support import describe_error
+from algorithm_playground.core.description import describe_error
+
+__all__ = ["HookError", "call_hook"]
 
 HookResult = TypeVar("HookResult")
 
@@ -23,8 +23,15 @@ HookResult = TypeVar("HookResult")
 class HookError(RuntimeError):
     """A hook of a problem raised, or returned something that cannot be used.
 
-    ``hook`` names the hook and the message says what it raised, for example
-    ``The problem's fixtures hook raised RuntimeError: out of memory.``
+    The message says what the hook raised, for example ``The problem's
+    fixtures hook raised RuntimeError: out of memory.``
+
+    Args:
+        hook: The name of the hook.
+        error: What the hook raised.
+
+    Attributes:
+        hook: The name of the hook.
     """
 
     def __init__(self, hook: str, error: BaseException) -> None:
@@ -33,15 +40,27 @@ class HookError(RuntimeError):
 
 
 def call_hook(hook: str, call: Callable[[], HookResult]) -> HookResult:
-    """Return what ``call`` returns; raise :class:`HookError` naming ``hook`` if it raises.
+    """Call a hook and turn whatever it raises into a :class:`HookError`.
 
     ``call`` should do everything with the hook's return value that can fail
     (iterating it, reading its attributes), so that a hook that returns
     something unusable is reported as the hook's failure too.
+
+    Args:
+        hook: The name of the hook, used in the error message.
+        call: A function that calls the hook and uses its result.
+
+    Returns:
+        What ``call`` returns.
+
+    Raises:
+        HookError: If ``call`` raises. A :class:`HookError` raised by ``call``
+            passes through unchanged.
     """
     try:
         return call()
     except HookError:
         raise
     except Exception as error:
+        # A problem comes from outside this package, so any exception is the hook's failure.
         raise HookError(hook, error) from error

@@ -1,13 +1,28 @@
 """Typer arguments and options that several commands share."""
 
-from __future__ import annotations
-
 import math
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from typer.models import OptionInfo
+
+from algorithm_playground.cli.implementation_selection import EnvironmentPolicy
+
+__all__ = [
+    "BuildOption",
+    "CommandOption",
+    "ConfigurationOption",
+    "ImplementationArgument",
+    "ImplementationsArgument",
+    "InheritEnvironmentOption",
+    "NameOption",
+    "ProblemModuleOption",
+    "build_json_option",
+    "build_timeout_option",
+    "choose_environment_policy",
+    "require_finite_timeout",
+]
 
 ImplementationsArgument = Annotated[
     list[str] | None,
@@ -101,18 +116,58 @@ InheritEnvironmentOption = Annotated[
 ]
 
 
-def finite_timeout(value: float) -> float:
-    """Typer callback for ``--timeout``: reject ``nan`` and infinity."""
+def require_finite_timeout(value: float) -> float:
+    """Reject ``nan`` and infinity; Typer callback for ``--timeout``.
+
+    Args:
+        value: The timeout in seconds.
+
+    Returns:
+        The value unchanged.
+
+    Raises:
+        typer.BadParameter: If the value is not a finite number.
+    """
     if not math.isfinite(value):
         raise typer.BadParameter(f"Timeout must be a finite number, got {value}.")
     return value
 
 
-def timeout_option(help_text: str) -> OptionInfo:
-    """Return the ``--timeout`` option (seconds, finite, positive), described by ``help_text``."""
-    return typer.Option("--timeout", min=0.001, callback=finite_timeout, help=help_text)
+def build_timeout_option(help_text: str) -> OptionInfo:
+    """Build the ``--timeout`` option (seconds, finite, positive).
+
+    Args:
+        help_text: The help shown for the option.
+
+    Returns:
+        The option, to be used in an ``Annotated`` parameter.
+    """
+    return typer.Option("--timeout", min=0.001, callback=require_finite_timeout, help=help_text)
 
 
-def json_option(help_text: str) -> OptionInfo:
-    """Return the ``--json`` option, described by ``help_text``."""
+def build_json_option(help_text: str) -> OptionInfo:
+    """Build the ``--json`` option.
+
+    Args:
+        help_text: The help shown for the option.
+
+    Returns:
+        The option, to be used in an ``Annotated`` parameter.
+    """
     return typer.Option("--json", help=help_text, dir_okay=False, resolve_path=True)
+
+
+def choose_environment_policy(inherit_environment: bool) -> EnvironmentPolicy:
+    """Translate the ``--inherit-environment`` option into the policy it stands for.
+
+    Args:
+        inherit_environment: Whether the option was given.
+
+    Returns:
+        :attr:`EnvironmentPolicy.INHERIT` when it was given, else
+        :attr:`EnvironmentPolicy.MINIMAL`.
+    """
+    if inherit_environment:
+        return EnvironmentPolicy.INHERIT
+    else:
+        return EnvironmentPolicy.MINIMAL

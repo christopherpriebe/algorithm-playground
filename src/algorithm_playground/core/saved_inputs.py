@@ -16,23 +16,42 @@ digest of the original, so that two different names never share a directory.
 ``deserialize_input``).
 """
 
-from __future__ import annotations
-
 import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from algorithm_playground.core._support import describe_error
-from algorithm_playground.core.problem import Problem
+from algorithm_playground.core.description import describe_error
+from algorithm_playground.core.problem import AnyProblem
 from algorithm_playground.core.single_run import CaseStatus
 from algorithm_playground.core.testing import TestReport
+
+__all__ = [
+    "INPUT_FILE_NAME",
+    "MAXIMUM_NAME_LENGTH",
+    "SHRUNK_INPUT_FILE_NAME",
+    "SavedInputs",
+    "safe_file_name",
+    "save_failing_inputs",
+]
 
 INPUT_FILE_NAME = "input.bin"
 SHRUNK_INPUT_FILE_NAME = "shrunk-input.bin"
 MAXIMUM_NAME_LENGTH = 80
 _UNSAFE_CHARACTERS = re.compile(r"[^A-Za-z0-9._=+-]")
+
+
+def _try_write_input(problem: AnyProblem, input_data: object, path: Path) -> str | None:
+    """Write ``input_data`` to ``path`` in the input format of ``problem``.
+
+    Return ``None`` on success, else the text of the error to report.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        problem.serialize_input(input_data, path)
+    except Exception as error:  # The serialize_input hook is problem code; report any failure.
+        return f"Could not save {path}: {describe_error(error)}"
+    return None
 
 
 @dataclass(frozen=True)
@@ -48,11 +67,27 @@ class SavedInputs:
     errors: tuple[str, ...] = ()
 
     def input_path(self, implementation_name: str, case_identifier: str) -> Path | None:
-        """Return the file with the input of a failing case, or ``None`` if there is none."""
+        """Look up the file with the input of a failing case.
+
+        Args:
+            implementation_name: The implementation that failed the case.
+            case_identifier: The identifier of the failing case.
+
+        Returns:
+            The file, or ``None`` if there is none.
+        """
         return self.inputs.get((implementation_name, case_identifier))
 
     def shrunk_input_path(self, implementation_name: str, case_identifier: str) -> Path | None:
-        """Return the file with the shrunk input of a failing case, or ``None`` if there is none."""
+        """Look up the file with the shrunk input of a failing case.
+
+        Args:
+            implementation_name: The implementation that failed the case.
+            case_identifier: The identifier of the failing case.
+
+        Returns:
+            The file, or ``None`` if there is none.
+        """
         return self.shrunk_inputs.get((implementation_name, case_identifier))
 
 
@@ -64,6 +99,12 @@ def safe_file_name(text: str) -> str:
     ignores case), or that is longer than 80 characters is cut to fit and ends
     in a short digest of the whole text, so that two different texts stay
     different. A name that needs none is returned as it is.
+
+    Args:
+        text: The text to turn into a file name.
+
+    Returns:
+        The file name.
     """
     name = _UNSAFE_CHARACTERS.sub("_", text) or "_"
     if name.startswith("."):
@@ -74,29 +115,25 @@ def safe_file_name(text: str) -> str:
     return name
 
 
-def save_failing_inputs(
-    problem: Problem[Any, Any, Any], report: TestReport, directory: Path
-) -> SavedInputs:
+def save_failing_inputs(problem: AnyProblem, report: TestReport, directory: Path) -> SavedInputs:
     """Write the input of every failing case of ``report`` below ``directory``.
 
     Each failing outcome gets ``input.bin`` and, when shrinking found a smaller
-    input, ``shrunk-input.bin`` next to it. A problem whose ``serialize_input``
-    raises, or a file that cannot be written, is recorded in
-    :attr:`SavedInputs.errors`.
+    input, ``shrunk-input.bin`` next to it.
+
+    Args:
+        problem: The problem whose input format the files use.
+        report: The test report with the failing outcomes.
+        directory: The directory to write below.
+
+    Returns:
+        The paths of the written files. A problem whose ``serialize_input``
+        raises, or a file that cannot be written, is recorded in
+        :attr:`SavedInputs.errors`.
     """
     inputs: dict[tuple[str, str], Path] = {}
     shrunk_inputs: dict[tuple[str, str], Path] = {}
     errors: list[str] = []
-
-    def save(input_data: Any, path: Path) -> bool:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            problem.serialize_input(input_data, path)
-        except Exception as error:
-            errors.append(f"Could not save {path}: {describe_error(error)}")
-            return False
-        return True
-
     for outcome in report.outcomes:
         if outcome.status is CaseStatus.PASSED:
             continue
@@ -106,10 +143,14 @@ def save_failing_inputs(
             / safe_file_name(outcome.implementation_name)
             / safe_file_name(outcome.case_identifier)
         )
-        if save(outcome.case.input_data, case_directory / INPUT_FILE_NAME):
-            inputs[key] = case_directory / INPUT_FILE_NAME
-        if outcome.shrunk is not None and save(
-            outcome.shrunk.case.input_data, case_directory / SHRUNK_INPUT_FILE_NAME
-        ):
-            shrunk_inputs[key] = case_directory / SHRUNK_INPUT_FILE_NAME
+        targets = [(outcome.case.input_data, case_directory / INPUT_FILE_NAME, inputs)]
+        if outcome.shrunk is not None:
+            shrunk_path = case_directory / SHRUNK_INPUT_FILE_NAME
+            targets.append((outcome.shrunk.case.input_data, shrunk_path, shrunk_inputs))
+        for input_data, path, saved_paths in targets:
+            error = _try_write_input(problem, input_data, path)
+            if error is None:
+                saved_paths[key] = path
+            else:
+                errors.append(error)
     return SavedInputs(inputs, shrunk_inputs, tuple(errors))

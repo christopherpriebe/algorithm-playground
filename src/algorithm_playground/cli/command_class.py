@@ -7,14 +7,22 @@ for a mistyped option as the repr of a tuple. This class shows the metavar alone
 and repairs the message.
 """
 
-from __future__ import annotations
-
+from collections.abc import Sequence
 from importlib.metadata import version
-from typing import Any
+from typing import Any, Protocol, cast
 
 from typer.core import TyperCommand
 
+__all__ = ["ClickContext", "PassedArgument", "UserFacingCommand"]
+
 FIRST_TYPER_SHOWING_METAVARS_ALONE = (0, 27)
+
+# The context class of click is part of Typer, and its module changes between Typer versions
+# (Typer 0.26 includes click), so it cannot be named here.
+ClickContext = Any
+# Arguments that go to TyperCommand unchanged; the parameters of TyperCommand differ between
+# Typer versions.
+PassedArgument = Any
 
 
 def _typer_version() -> tuple[int, int]:
@@ -22,33 +30,59 @@ def _typer_version() -> tuple[int, int]:
     return int(major), int(minor)
 
 
+def _is_unknown_option_error(failure: Exception) -> bool:
+    return hasattr(failure, "option_name") and hasattr(failure, "possibilities")
+
+
+def _describe_suggestion(possibilities: Sequence[str]) -> str:
+    if len(possibilities) == 1:
+        return f" Did you mean {possibilities[0]}?"
+    elif possibilities:
+        return f" Did you mean one of {', '.join(possibilities)}?"
+    else:
+        return ""
+
+
+class _UnknownOptionError(Protocol):
+    """The parts of click's error for an unknown option that this module changes."""
+
+    option_name: str
+    possibilities: Sequence[str] | None
+    message: str
+
+
 class UserFacingCommand(TyperCommand):
     """A Typer command whose arguments are shown by their metavars and whose option errors are plain."""
 
-    def __init__(self, *arguments: Any, **keywords: Any) -> None:
+    def __init__(self, *arguments: PassedArgument, **keywords: PassedArgument) -> None:
         super().__init__(*arguments, **keywords)
-        if _typer_version() >= FIRST_TYPER_SHOWING_METAVARS_ALONE:
-            return
-        for parameter in self.params:
-            if parameter.param_type_name == "argument" and parameter.metavar:
-                parameter.opts = []
+        if _typer_version() < FIRST_TYPER_SHOWING_METAVARS_ALONE:
+            for parameter in self.params:
+                if parameter.param_type_name == "argument" and parameter.metavar:
+                    parameter.opts = []
 
     # Click names these two parameters ``ctx`` and ``args`` and always passes them by position.
     def parse_args(  # ty: ignore[invalid-method-override]
-        self, context: Any, arguments: list[str]
+        self, context: ClickContext, arguments: list[str]
     ) -> list[str]:
+        """Parse the arguments, explaining a mistyped option plainly.
+
+        Args:
+            context: The click context of the invocation.
+            arguments: The command-line arguments to parse.
+
+        Returns:
+            The arguments that remain after parsing.
+        """
         try:
             return super().parse_args(context, arguments)
         except Exception as failure:
-            if not (hasattr(failure, "option_name") and hasattr(failure, "possibilities")):
+            # The error for an unknown option is not one type that this module can name
+            # across Typer versions, so recognize it by its attributes and re-raise the rest.
+            if not _is_unknown_option_error(failure):
                 raise
-            error: Any = failure
-            possibilities = sorted(error.possibilities or ())
-            suggestion = ""
-            if len(possibilities) == 1:
-                suggestion = f" Did you mean {possibilities[0]}?"
-            elif possibilities:
-                suggestion = f" Did you mean one of {', '.join(possibilities)}?"
+            error = cast(_UnknownOptionError, failure)
+            suggestion = _describe_suggestion(sorted(error.possibilities or ()))
             error.message = f"No such option: {error.option_name}.{suggestion}"
             error.possibilities = None
             raise

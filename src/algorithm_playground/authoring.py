@@ -8,12 +8,10 @@ Everything here is part of the public API and changes only with a deliberate
 version bump: the :class:`Problem` interface with its value types, the
 registration decorator, the helpers that read and write the binary formats,
 the building blocks for shrinking, describing and replaying, the chart renderers
-that turn data into the text of a :class:`Frame`, and the validation kit. The rest of the package (the engines, the registry, the
-command-line front end) is not meant for problem authors. See the guide
-:doc:`/writing-a-problem`.
+that turn data into the text of a :class:`Frame`, and the validation kit. The
+rest of the package (the engines, the registry, the command-line front end) is
+not meant for problem authors. See the guide :doc:`/writing-a-problem`.
 """
-
-from __future__ import annotations
 
 from algorithm_playground.core.binary_format import (
     BinaryFormatError,

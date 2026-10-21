@@ -14,8 +14,6 @@ interface, using the building blocks of the core for the failure reports and
 for shrinking. The contract is documented in :doc:`/problems/sorting`.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 
@@ -35,6 +33,8 @@ from algorithm_playground.problems.sorting.generators import sorting_generators
 from algorithm_playground.problems.sorting.replay import replay_warnings
 from algorithm_playground.problems.sorting.trace import SortingTrace, count_operations, read_trace
 from algorithm_playground.problems.sorting.verification import verify_sorted
+
+__all__ = ["SortingProblem"]
 
 
 @register_problem

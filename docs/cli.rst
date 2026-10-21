@@ -44,7 +44,7 @@ reports. A configured implementation uses its configured name, a file uses its
 file name, and a command uses its ``--name`` or else the name of the last of its
 arguments that names an existing file without its extension, followed by the
 arguments after it (``python3 sort.py`` is called ``sort``, ``python3
-tests/instrumented_sort.py insertion`` is called ``instrumented_sort insertion``,
+tests/helpers/instrumented_sort.py insertion`` is called ``instrumented_sort insertion``,
 and ``java -jar build/Sort.jar`` is called ``Sort``), or its command text when no
 argument does. So two commands that run one script with other arguments stay
 apart. When two implementations would share a name (``a/sort`` and ``b/sort``)

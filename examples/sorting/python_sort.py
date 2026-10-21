@@ -10,8 +10,6 @@ trace format; an algorithm you write yourself would record a snapshot after
 each step.
 """
 
-from __future__ import annotations
-
 import struct
 import sys
 from pathlib import Path
@@ -20,24 +18,22 @@ USAGE = "usage: python_sort.py <input.bin> <output.bin> [<trace.bin>]"
 SNAPSHOT_TRACE_KIND = 0
 
 
-def main(arguments: list[str]) -> int:
-    if len(arguments) not in (3, 4):
-        print(USAGE, file=sys.stderr)
-        return 2
-
-    input_path = Path(arguments[1])
-    output_path = Path(arguments[2])
-    trace_path = Path(arguments[3]) if len(arguments) == 4 else None
-
-    values = read_input(input_path)
-    sorted_values = sorted(values)
-    write_output(output_path, sorted_values)
-    if trace_path is not None:
-        write_trace(trace_path, [values, sorted_values])
-    return 0
+def _encode_array(values: list[int]) -> bytes:
+    return struct.pack(f"<Q{len(values)}i", len(values), *values)
 
 
 def read_input(path: Path) -> list[int]:
+    """Read an input file.
+
+    Args:
+        path: The file holding ``u64 count`` and then ``count`` i32 values.
+
+    Returns:
+        The values.
+
+    Raises:
+        ValueError: If the file is too small or its size does not match its count.
+    """
     raw = path.read_bytes()
     if len(raw) < 8:
         raise ValueError("Input file is too small to contain a u64 count.")
@@ -52,18 +48,51 @@ def read_input(path: Path) -> list[int]:
 
 
 def write_output(path: Path, values: list[int]) -> None:
+    """Write the sorted values in the same format as the input.
+
+    Args:
+        path: The output file.
+        values: The sorted values.
+    """
     path.write_bytes(_encode_array(values))
 
 
 def write_trace(path: Path, snapshots: list[list[int]]) -> None:
+    """Write a state-snapshot trace (kind ``0``).
+
+    Args:
+        path: The trace file.
+        snapshots: The array after each step.
+    """
     buffer = bytearray(struct.pack("<II", SNAPSHOT_TRACE_KIND, len(snapshots)))
     for snapshot in snapshots:
         buffer.extend(_encode_array(snapshot))
     path.write_bytes(bytes(buffer))
 
 
-def _encode_array(values: list[int]) -> bytes:
-    return struct.pack(f"<Q{len(values)}i", len(values), *values)
+def main(arguments: list[str]) -> int:
+    """Sort the input file and write the output and, if asked, the trace.
+
+    Args:
+        arguments: The command line, starting with the script name.
+
+    Returns:
+        The exit status: 0 on success, 2 for a wrong number of arguments.
+    """
+    if len(arguments) not in (3, 4):
+        print(USAGE, file=sys.stderr)
+        return 2
+
+    input_path = Path(arguments[1])
+    output_path = Path(arguments[2])
+    trace_path = Path(arguments[3]) if len(arguments) == 4 else None
+
+    values = read_input(input_path)
+    sorted_values = sorted(values)
+    write_output(output_path, sorted_values)
+    if trace_path is not None:
+        write_trace(trace_path, [values, sorted_values])
+    return 0
 
 
 if __name__ == "__main__":

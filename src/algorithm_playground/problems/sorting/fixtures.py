@@ -1,19 +1,24 @@
 """Hand-written sorting inputs: small cases where a failure is easy to understand."""
 
-from __future__ import annotations
-
 from collections.abc import Iterator
 from itertools import permutations
 
 from algorithm_playground.core.cases import Fixture
 from algorithm_playground.problems.sorting.codec import I32_MAX, I32_MIN
 
+__all__ = ["BOUNDARY_LENGTHS", "BOUNDARY_STRIDE", "sorting_fixtures"]
+
 BOUNDARY_LENGTHS = (15, 16, 17)
-BOUNDARY_STRIDE = 7  # coprime to every boundary length, so i * stride mod length is a permutation
+# Coprime to every boundary length, so (index * stride) mod length is a permutation.
+BOUNDARY_STRIDE = 7
 
 
 def sorting_fixtures() -> Iterator[Fixture[list[int]]]:
-    """Yield the sorting fixtures: tiny, structured, duplicated, extreme, and boundary inputs."""
+    """Yield the sorting fixtures: tiny, structured, duplicated, extreme, and boundary inputs.
+
+    Yields:
+        A named fixture for each hand-written input.
+    """
     yield Fixture("empty", [], "no elements")
     yield Fixture("single", [42], "one element")
     yield Fixture("two_sorted", [1, 2], "two elements already in order")

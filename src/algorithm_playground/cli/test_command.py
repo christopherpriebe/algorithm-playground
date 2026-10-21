@@ -1,16 +1,15 @@
-"""`algorithm-playground test` — run implementations against fixtures and generated cases."""
-
-from __future__ import annotations
+"""`algorithm-playground test`: run implementations against fixtures and generated cases."""
 
 import shlex
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.markup import escape
 
-from algorithm_playground.cli.context import CommandContext
+from algorithm_playground.cli.context import FAILURE_EXIT_CODE, BuildOutcome, CommandContext
 from algorithm_playground.cli.implementation_selection import selection_arguments
 from algorithm_playground.cli.options import (
     BuildOption,
@@ -20,12 +19,14 @@ from algorithm_playground.cli.options import (
     InheritEnvironmentOption,
     NameOption,
     ProblemModuleOption,
-    json_option,
-    timeout_option,
+    build_json_option,
+    build_timeout_option,
+    choose_environment_policy,
 )
-from algorithm_playground.cli.rendering import progress_display
+from algorithm_playground.cli.rendering import create_progress_display
 from algorithm_playground.cli.test_rendering import (
     description_limit,
+    print_expanded_matrix,
     print_failure_details,
     print_matrix,
     print_summaries,
@@ -33,20 +34,319 @@ from algorithm_playground.cli.test_rendering import (
 from algorithm_playground.core.cases import (
     DEFAULT_MAXIMUM_SIZE,
     DEFAULT_RANDOM_CASE_COUNT,
-    Case,
+    AnyCase,
     CaseError,
     CasePlan,
     FixtureOrigin,
     build_cases,
     select_generators,
 )
-from algorithm_playground.core.problem import Problem
+from algorithm_playground.core.configuration import Configuration
+from algorithm_playground.core.implementation import Implementation
+from algorithm_playground.core.problem import AnyProblem
 from algorithm_playground.core.report import correctness_report_to_json
-from algorithm_playground.core.runner import DEFAULT_TIMEOUT_SECONDS
+from algorithm_playground.core.runner import DEFAULT_TIMEOUT_SECONDS, TemporaryFilePolicy
 from algorithm_playground.core.saved_inputs import SavedInputs, save_failing_inputs
-from algorithm_playground.core.testing import CasePhase, CaseProgress, run_tests
+from algorithm_playground.core.testing import (
+    CasePhase,
+    CaseProgress,
+    ShrinkOptions,
+    TestReport,
+    TestRunOptions,
+    run_tests,
+)
+
+__all__ = ["DEFAULT_MAXIMUM_FAILURES", "test_command"]
 
 DEFAULT_MAXIMUM_FAILURES = 5
+
+
+def _describe_progress(event: CaseProgress) -> str:
+    verb = "shrinking" if event.phase is CasePhase.SHRINKING else "testing"
+    return f"{verb} {event.implementation_name} on {event.case_identifier}"
+
+
+def _run_with_progress(
+    context: CommandContext,
+    problem: AnyProblem,
+    *,
+    implementations: Sequence[Implementation],
+    cases: Sequence[AnyCase],
+    options: TestRunOptions,
+) -> TestReport:
+    with create_progress_display(context.error_console) as progress:
+        task_identifier = progress.add_task("testing", total=len(cases) * len(implementations))
+
+        def show_progress(event: CaseProgress) -> None:
+            if event.phase is CasePhase.COMPLETED:
+                progress.update(task_identifier, advance=1)
+            else:
+                progress.update(task_identifier, description=escape(_describe_progress(event)))
+
+        return run_tests(
+            problem, implementations, cases, options=options, on_progress=show_progress
+        )
+
+
+def _save_inputs(
+    context: CommandContext, problem: AnyProblem, report: TestReport, *, directory: Path | None
+) -> SavedInputs:
+    """Write the inputs of the failing cases under ``directory``, when one is given."""
+    if directory is None:
+        return SavedInputs()
+    saved = save_failing_inputs(problem, report, directory)
+    context.warn(*saved.errors)
+    return saved
+
+
+def _build_selections(
+    problem_name: str,
+    implementations: Sequence[Implementation],
+    configuration: Configuration | None,
+) -> dict[str, tuple[str, ...]]:
+    """Map each implementation name to the arguments that select it again."""
+    return {
+        implementation.name: selection_arguments(problem_name, implementation, configuration)
+        for implementation in implementations
+    }
+
+
+def _resolve_exact_cases(
+    context: CommandContext, problem: AnyProblem, selection: "_CaseSelection"
+) -> tuple[AnyCase, ...]:
+    planning_options = selection.planning_options()
+    if planning_options:
+        context.fail(
+            "--fixture and --case select exact cases, so they cannot be combined with "
+            + ", ".join(planning_options)
+        )
+    resolved: dict[str, AnyCase] = {}
+    for identifier in [
+        *(FixtureOrigin(name).identifier for name in selection.fixture_names),
+        *selection.case_identifiers,
+    ]:
+        case = context.resolve_case(problem, identifier)
+        resolved.setdefault(case.identifier, case)
+    return tuple(resolved.values())
+
+
+def _plan_cases(
+    context: CommandContext, problem: AnyProblem, selection: "_CaseSelection"
+) -> tuple[tuple[AnyCase, ...], CasePlan]:
+    try:
+        plan = CasePlan(
+            include_fixtures=not selection.no_fixtures,
+            random_case_count=(
+                DEFAULT_RANDOM_CASE_COUNT
+                if selection.random_cases is None
+                else selection.random_cases
+            ),
+            maximum_size=(
+                DEFAULT_MAXIMUM_SIZE if selection.maximum_size is None else selection.maximum_size
+            ),
+            generator_names=tuple(
+                generator.name for generator in select_generators(problem, selection.distributions)
+            ),
+            seed=0 if selection.seed is None else selection.seed,
+        )
+        cases = build_cases(problem, plan)
+    except CaseError as error:
+        context.fail(str(error))
+    if not cases:
+        context.fail(
+            "There are no cases to run: --no-fixtures needs --random-cases greater than 0."
+        )
+    return cases, plan
+
+
+def _select_cases(
+    context: CommandContext, problem: AnyProblem, selection: "_CaseSelection"
+) -> tuple[tuple[AnyCase, ...], CasePlan | None]:
+    """Return the cases to run and the plan they came from.
+
+    The cases are the ones named explicitly (the plan is then ``None``), or
+    else the planned ones.
+    """
+    if selection.has_exact_cases():
+        return _resolve_exact_cases(context, problem, selection), None
+    else:
+        return _plan_cases(context, problem, selection)
+
+
+def _build_reproduction(
+    problem_name: str,
+    selections: Mapping[str, tuple[str, ...]],
+    settings: "_RunSettings",
+) -> Callable[[str, str], str]:
+    """Return a function that writes the command that reruns one case of one implementation."""
+    option_arguments = settings.reproduction_arguments()
+
+    def reproduce(implementation_name: str, case_identifier: str) -> str:
+        return shlex.join(
+            [
+                "algorithm-playground",
+                "test",
+                problem_name,
+                *selections[implementation_name],
+                *option_arguments,
+                "--case",
+                case_identifier,
+            ]
+        )
+
+    return reproduce
+
+
+def _print_report(
+    context: CommandContext, completed: "_CompletedRun", display: "_ReportDisplay"
+) -> None:
+    console = context.console
+    report, names, outcome = completed.report, completed.names, completed.outcome
+    if display.verbose:
+        print_expanded_matrix(
+            console, report, names, build_failures=outcome.failures, unrunnable=outcome.unrunnable
+        )
+    else:
+        print_matrix(
+            console, report, names, build_failures=outcome.failures, unrunnable=outcome.unrunnable
+        )
+    print_failure_details(
+        console,
+        report,
+        names,
+        unavailable=outcome.unavailable,
+        maximum_failures=display.maximum_failures,
+        reproduce=display.reproduce,
+        saved=completed.saved,
+    )
+    print_summaries(
+        console, report, names, build_failures=outcome.failures, unrunnable=outcome.unrunnable
+    )
+
+
+def _write_json_report(context: CommandContext, path: Path, completed: "_CompletedRun") -> None:
+    document = correctness_report_to_json(
+        completed.report,
+        implementations=completed.implementations,
+        plan=completed.plan,
+        build_failures={name: str(error) for name, error in completed.outcome.failures.items()},
+        unrunnable=completed.outcome.unrunnable,
+        saved_inputs=completed.saved,
+    )
+    context.write_json(path, document, label="test report")
+
+
+@dataclass(frozen=True)
+class _CaseSelection:
+    """The options that choose which cases to run."""
+
+    random_cases: int | None
+    maximum_size: int | None
+    seed: int | None
+    distributions: tuple[str, ...]
+    no_fixtures: bool
+    fixture_names: tuple[str, ...]
+    case_identifiers: tuple[str, ...]
+
+    def has_exact_cases(self) -> bool:
+        """Return whether fixtures or cases are named, instead of planned."""
+        return bool(self.fixture_names or self.case_identifiers)
+
+    def planning_options(self) -> list[str]:
+        """Return the options given that shape a plan of cases."""
+        return [
+            option
+            for option, given in (
+                ("--random-cases", self.random_cases is not None),
+                ("--maximum-size", self.maximum_size is not None),
+                ("--seed", self.seed is not None),
+                ("--distribution", bool(self.distributions)),
+                ("--no-fixtures", self.no_fixtures),
+            )
+            if given
+        ]
+
+
+@dataclass(frozen=True)
+class _RunSettings:
+    """The options that say how the cases are run."""
+
+    configuration_path: Path | None
+    problem_modules: tuple[str, ...]
+    build: bool
+    timeout_seconds: float
+    keep_temporary_files: bool
+    shrink: bool
+
+    def build_run_options(self, maximum_description_length: int) -> TestRunOptions:
+        """Return the options of :func:`run_tests` for these settings.
+
+        Args:
+            maximum_description_length: How long a description of an input or output may be.
+
+        Returns:
+            The options.
+        """
+        return TestRunOptions(
+            timeout_seconds=self.timeout_seconds,
+            temporary_files=(
+                TemporaryFilePolicy.KEEP
+                if self.keep_temporary_files
+                else TemporaryFilePolicy.DELETE
+            ),
+            shrinking=ShrinkOptions() if self.shrink else None,
+            description_limit=maximum_description_length,
+        )
+
+    def reproduction_arguments(self) -> list[str]:
+        """Return the arguments that give again the options that change what a rerun finds.
+
+        These are the options that change what the command finds or how it judges,
+        such as ``--timeout``.
+        """
+        return [
+            *(
+                []
+                if self.configuration_path is None
+                else ["--configuration", str(self.configuration_path)]
+            ),
+            *(
+                argument
+                for module in self.problem_modules
+                for argument in ("--problem-module", module)
+            ),
+            *(
+                []
+                if self.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+                else ["--timeout", f"{self.timeout_seconds:g}"]
+            ),
+            *([] if self.build else ["--no-build"]),
+        ]
+
+
+@dataclass(frozen=True)
+class _CompletedRun:
+    """Everything a finished run of the cases produced."""
+
+    report: TestReport
+    implementations: tuple[Implementation, ...]
+    outcome: BuildOutcome
+    saved: SavedInputs
+    plan: CasePlan | None
+
+    @property
+    def names(self) -> list[str]:
+        """The names of all the selected implementations, in order."""
+        return [implementation.name for implementation in self.implementations]
+
+
+@dataclass(frozen=True)
+class _ReportDisplay:
+    """How the report is shown."""
+
+    verbose: bool
+    maximum_failures: int
+    reproduce: Callable[[str, str], str]
 
 
 def test_command(
@@ -137,7 +437,7 @@ def test_command(
         ),
     ] = DEFAULT_MAXIMUM_FAILURES,
     timeout_seconds: Annotated[
-        float, timeout_option("Per-case timeout in seconds.")
+        float, build_timeout_option("Per-case timeout in seconds.")
     ] = DEFAULT_TIMEOUT_SECONDS,
     keep_temporary_files: Annotated[
         bool,
@@ -168,10 +468,39 @@ def test_command(
         ),
     ] = False,
     json_path: Annotated[
-        Path | None, json_option("Write the full test report to this JSON file.")
+        Path | None, build_json_option("Write the full test report to this JSON file.")
     ] = None,
 ) -> None:
-    """Run the cases of ``problem_name`` against each selected implementation."""
+    """Run the cases of a problem against each selected implementation.
+
+    Args:
+        problem_name: The name of the registered problem.
+        selectors: The names or paths of the implementations to run.
+        command_texts: The ``--command`` values naming implementations.
+        command_names: The ``--name`` values for the commands.
+        configuration_path: The configuration file to read.
+        problem_modules: Python modules or files that register problems.
+        build: Whether to run each implementation's build command first.
+        inherit_environment: Whether to give implementations the full environment.
+        random_cases: The number of generated cases.
+        maximum_size: The largest size of a generated case.
+        seed: The seed of the generated cases.
+        distributions: The distributions to draw generated cases from.
+        no_fixtures: Whether to skip the problem's fixtures.
+        fixture_names: The fixtures to run instead of the planned cases.
+        case_identifiers: The cases to run instead of the planned cases.
+        shrink: Whether to shrink the input of a failing generated case.
+        maximum_failures: How many failures to describe in full per implementation.
+        timeout_seconds: The timeout of each case.
+        keep_temporary_files: Whether to keep the scratch directory of the run.
+        save_failing_inputs_directory: Where to write the inputs of failing cases.
+        verbose: Whether to show a row for every fixture in the matrix.
+        json_path: Where to write the full report as JSON.
+
+    Raises:
+        typer.Exit: With the failure code if any case failed or any implementation
+            could not run.
+    """
     context = CommandContext(configuration_path, problem_modules)
     problem = context.get_problem(problem_name)
     context.check_json_path(json_path)
@@ -180,188 +509,60 @@ def test_command(
     cases, plan = _select_cases(
         context,
         problem,
-        random_cases=random_cases,
-        maximum_size=maximum_size,
-        seed=seed,
-        distributions=distributions or (),
-        no_fixtures=no_fixtures,
-        fixture_names=fixture_names or (),
-        case_identifiers=case_identifiers or (),
+        _CaseSelection(
+            random_cases=random_cases,
+            maximum_size=maximum_size,
+            seed=seed,
+            distributions=tuple(distributions or ()),
+            no_fixtures=no_fixtures,
+            fixture_names=tuple(fixture_names or ()),
+            case_identifiers=tuple(case_identifiers or ()),
+        ),
     )
     selected = context.select_implementations(
         problem_name,
         selectors=selectors,
         command_texts=command_texts,
         command_names=command_names,
-        inherit_environment=inherit_environment,
+        environment_policy=choose_environment_policy(inherit_environment),
     )
-    outcome = context.build(selected, build=build)
+    outcome = context.build_and_check(selected) if build else context.check_startable(selected)
 
-    with progress_display(context.error_console, with_bar=False) as progress:
-        task_identifier = progress.add_task("testing", total=len(cases) * len(outcome.ready))
+    settings = _RunSettings(
+        configuration_path=configuration_path,
+        problem_modules=tuple(problem_modules or ()),
+        build=build,
+        timeout_seconds=timeout_seconds,
+        keep_temporary_files=keep_temporary_files,
+        shrink=shrink,
+    )
+    report = _run_with_progress(
+        context,
+        problem,
+        implementations=outcome.ready,
+        cases=cases,
+        options=settings.build_run_options(description_limit(context.console)),
+    )
+    completed = _CompletedRun(
+        report=report,
+        implementations=selected,
+        outcome=outcome,
+        saved=_save_inputs(context, problem, report, directory=save_failing_inputs_directory),
+        plan=plan,
+    )
 
-        def show_progress(event: CaseProgress) -> None:
-            if event.phase is CasePhase.COMPLETED:
-                progress.update(task_identifier, advance=1)
-                return
-            verb = "shrinking" if event.phase is CasePhase.SHRINKING else "testing"
-            description = f"{verb} {event.implementation_name} on {event.case_identifier}"
-            progress.update(task_identifier, description=escape(description))
-
-        report = run_tests(
-            problem,
-            outcome.ready,
-            cases,
-            timeout_seconds=timeout_seconds,
-            keep_temporary_files=keep_temporary_files,
-            shrink=shrink,
-            description_limit=description_limit(context.console),
-            on_progress=show_progress,
-        )
-
-    saved = SavedInputs()
-    if save_failing_inputs_directory is not None:
-        saved = save_failing_inputs(problem, report, save_failing_inputs_directory)
-        context.warn(*saved.errors)
-
-    names = [implementation.name for implementation in selected]
-    reproduce = _reproduction_builder(
+    reproduce = _build_reproduction(
         problem_name,
-        {
-            implementation.name: selection_arguments(
-                problem_name, implementation, context.configuration
-            )
-            for implementation in selected
-        },
-        [
-            *([] if configuration_path is None else ["--configuration", str(configuration_path)]),
-            *(
-                argument
-                for module in problem_modules or ()
-                for argument in ("--problem-module", module)
-            ),
-            *(
-                []
-                if timeout_seconds == DEFAULT_TIMEOUT_SECONDS
-                else ["--timeout", f"{timeout_seconds:g}"]
-            ),
-            *([] if build else ["--no-build"]),
-        ],
+        _build_selections(problem_name, selected, context.configuration),
+        settings,
     )
-    print_matrix(
-        context.console, report, names, outcome.failures, outcome.unrunnable, verbose=verbose
+    _print_report(
+        context,
+        completed,
+        _ReportDisplay(verbose=verbose, maximum_failures=maximum_failures, reproduce=reproduce),
     )
-    print_failure_details(
-        context.console,
-        report,
-        names,
-        outcome.unavailable,
-        maximum_failures=maximum_failures,
-        reproduce=reproduce,
-        saved=saved,
-    )
-    print_summaries(context.console, report, names, outcome.failures, outcome.unrunnable)
-
     if json_path is not None:
-        document = correctness_report_to_json(
-            report,
-            implementations=selected,
-            plan=plan,
-            build_failures={name: str(error) for name, error in outcome.failures.items()},
-            unrunnable=outcome.unrunnable,
-            saved_inputs=saved,
-        )
-        context.write_json(json_path, document, label="test report")
+        _write_json_report(context, json_path, completed)
 
-    if outcome.unavailable or not report.passed:
-        raise typer.Exit(code=1)
-
-
-def _select_cases(
-    context: CommandContext,
-    problem: Problem[Any, Any, Any],
-    *,
-    random_cases: int | None,
-    maximum_size: int | None,
-    seed: int | None,
-    distributions: Sequence[str],
-    no_fixtures: bool,
-    fixture_names: Sequence[str],
-    case_identifiers: Sequence[str],
-) -> tuple[tuple[Case[Any], ...], CasePlan | None]:
-    """Return the cases to run and the plan they came from.
-
-    The cases are the ones named explicitly (the plan is then ``None``), or
-    else the planned ones.
-    """
-    if fixture_names or case_identifiers:
-        planning_options = [
-            option
-            for option, given in (
-                ("--random-cases", random_cases is not None),
-                ("--maximum-size", maximum_size is not None),
-                ("--seed", seed is not None),
-                ("--distribution", bool(distributions)),
-                ("--no-fixtures", no_fixtures),
-            )
-            if given
-        ]
-        if planning_options:
-            context.fail(
-                "--fixture and --case select exact cases, so they cannot be combined with "
-                + ", ".join(planning_options)
-            )
-        resolved: dict[str, Case[Any]] = {}
-        for identifier in [
-            *(FixtureOrigin(name).identifier for name in fixture_names),
-            *case_identifiers,
-        ]:
-            case = context.resolve_case(problem, identifier)
-            resolved.setdefault(case.identifier, case)
-        return tuple(resolved.values()), None
-
-    try:
-        plan = CasePlan(
-            include_fixtures=not no_fixtures,
-            random_case_count=DEFAULT_RANDOM_CASE_COUNT if random_cases is None else random_cases,
-            maximum_size=DEFAULT_MAXIMUM_SIZE if maximum_size is None else maximum_size,
-            generator_names=tuple(
-                generator.name for generator in select_generators(problem, distributions)
-            ),
-            seed=0 if seed is None else seed,
-        )
-        cases = build_cases(problem, plan)
-    except CaseError as error:
-        context.fail(str(error))
-    if not cases:
-        context.fail(
-            "There are no cases to run: --no-fixtures needs --random-cases greater than 0."
-        )
-    return cases, plan
-
-
-def _reproduction_builder(
-    problem_name: str,
-    selections: Mapping[str, tuple[str, ...]],
-    option_arguments: Sequence[str],
-) -> Callable[[str, str], str]:
-    """Return a function that writes the command that reruns one case of one implementation.
-
-    ``option_arguments`` are the options of this run that change what the
-    command finds or how it judges, such as ``--timeout``.
-    """
-
-    def reproduce(implementation_name: str, case_identifier: str) -> str:
-        return shlex.join(
-            [
-                "algorithm-playground",
-                "test",
-                problem_name,
-                *selections[implementation_name],
-                *option_arguments,
-                "--case",
-                case_identifier,
-            ]
-        )
-
-    return reproduce
+    if outcome.unavailable or not report.has_passed:
+        raise typer.Exit(code=FAILURE_EXIT_CODE)
