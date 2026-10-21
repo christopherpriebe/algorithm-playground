@@ -1,59 +1,83 @@
-"""`algorithm-playground benchmark` — measure wall time across sizes with a seeded RNG."""
+"""`algorithm-playground benchmark` — measure wall time across sizes and distributions."""
 
 from __future__ import annotations
 
-import datetime as _datetime
-import hashlib
-import json
-import platform
-import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
-from rich.table import Table
+from rich.markup import escape
 
-from algorithm_playground.core.problem import Problem
-from algorithm_playground.core.registry import get_problem
-from algorithm_playground.core.runner import (
-    DEFAULT_TIMEOUT_SECONDS,
-    Runner,
-    RunnerError,
+from algorithm_playground.cli.benchmark_rendering import (
+    plot_medians,
+    print_comparison_table,
+    print_failures,
+    print_footer,
+    print_operation_issues,
+    print_operation_tables,
+    print_single_table,
 )
-from algorithm_playground.core.statistics import (
-    TimingSummary,
-    format_duration,
-    subtract_baseline,
-    summarize,
+from algorithm_playground.cli.context import CommandContext
+from algorithm_playground.cli.options import (
+    BuildOption,
+    CommandOption,
+    ConfigurationOption,
+    ImplementationsArgument,
+    InheritEnvironmentOption,
+    NameOption,
+    ProblemModuleOption,
+    json_option,
+    timeout_option,
 )
-from algorithm_playground.visualization import line_chart
-
-STARTUP_ROW_LABEL = "startup (empty input)"
+from algorithm_playground.cli.rendering import progress_display
+from algorithm_playground.core.benchmarking import (
+    BenchmarkFailure,
+    BenchmarkPhase,
+    BenchmarkProgress,
+    BenchmarkSettings,
+    FailureStage,
+    include_failed_implementations,
+    run_benchmark,
+    total_runs,
+)
+from algorithm_playground.core.cases import CaseError, check_sizes, select_generators
+from algorithm_playground.core.problem import Problem, has_trace_format
+from algorithm_playground.core.report import benchmark_report_to_json
+from algorithm_playground.core.runner import DEFAULT_TIMEOUT_SECONDS
 
 
 def benchmark_command(
     problem_name: Annotated[
         str, typer.Argument(metavar="PROBLEM", help="Name of the registered problem.")
     ],
-    executable: Annotated[
-        Path,
-        typer.Argument(
-            metavar="EXECUTABLE",
-            help="Path to the executable that implements the problem's binary contract.",
-            exists=True,
-            dir_okay=False,
-            file_okay=True,
-            resolve_path=True,
+    selectors: ImplementationsArgument = None,
+    command_texts: CommandOption = None,
+    command_names: NameOption = None,
+    configuration_path: ConfigurationOption = None,
+    problem_modules: ProblemModuleOption = None,
+    build: BuildOption = True,
+    inherit_environment: InheritEnvironmentOption = False,
+    reference: Annotated[
+        str | None,
+        typer.Option(
+            "--reference",
+            help=(
+                "Name of the implementation that ratios are computed against when several "
+                "are compared (default: the first one that is built and can be started)."
+            ),
         ),
-    ],
+    ] = None,
+    distributions: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--distribution",
+            help=(
+                "Name of an input distribution to measure. May be repeated "
+                "(default: the problem's default distribution only)."
+            ),
+        ),
+    ] = None,
     seed: Annotated[
         int,
         typer.Option(
@@ -65,7 +89,7 @@ def benchmark_command(
         str,
         typer.Option(
             "--sizes",
-            help="Comma-separated list of input sizes (e.g. 1000,10000,100000).",
+            help="Comma-separated list of input sizes (for example 1000,10000,100000).",
         ),
     ] = "1000,10000,100000",
     repetitions: Annotated[
@@ -85,12 +109,7 @@ def benchmark_command(
         ),
     ] = 1,
     timeout_seconds: Annotated[
-        float,
-        typer.Option(
-            "--timeout",
-            min=0.001,
-            help="Per-invocation timeout in seconds.",
-        ),
+        float, timeout_option("Per-invocation timeout in seconds.")
     ] = DEFAULT_TIMEOUT_SECONDS,
     verify_outputs: Annotated[
         bool,
@@ -100,18 +119,28 @@ def benchmark_command(
         ),
     ] = True,
     json_path: Annotated[
-        Path | None,
-        typer.Option(
-            "--json",
-            help="Write the full benchmark report to this JSON file.",
-            dir_okay=False,
-            resolve_path=True,
-        ),
+        Path | None, json_option("Write the full benchmark report to this JSON file.")
     ] = None,
     plot: Annotated[
         bool,
-        typer.Option("--plot/--no-plot", help="Draw a terminal plot of size vs. median time."),
+        typer.Option(
+            "--plot/--no-plot",
+            help="Draw a terminal plot of size against median time (only on a terminal).",
+        ),
     ] = True,
+    count_operations: Annotated[
+        bool,
+        typer.Option(
+            "--count-operations",
+            help=(
+                "After the timed runs of every distribution and size, run each implementation "
+                "once more with a trace file, untimed, and report the operations it counted "
+                "(for sorting: compares, swaps, writes) with their growth. An implementation "
+                "that writes no trace shows 'not reported'. Has no effect for a problem "
+                "without a trace format."
+            ),
+        ),
+    ] = False,
     subtract_startup_time: Annotated[
         bool,
         typer.Option(
@@ -123,114 +152,114 @@ def benchmark_command(
         ),
     ] = False,
 ) -> None:
-    """Benchmark ``executable`` against ``problem_name`` across multiple sizes."""
-    console = Console()
+    """Benchmark each selected implementation against ``problem_name`` across multiple sizes."""
+    context = CommandContext(configuration_path, problem_modules)
+    problem = context.get_problem(problem_name)
+    context.check_json_path(json_path)
+
+    parsed_sizes = _parse_sizes(sizes)
     try:
-        problem = get_problem(problem_name)
-    except KeyError as error:
-        console.print(f"[red]{error}[/red]")
-        raise typer.Exit(code=2) from error
-
-    size_values = _parse_sizes(sizes)
-    runner = Runner(problem, executable, timeout_seconds=timeout_seconds)
-
-    table = Table(title=f"benchmark — {problem_name}")
-    table.add_column("size", justify="right", no_wrap=True)
-    table.add_column("minimum", justify="right")
-    table.add_column("median", justify="right")
-    table.add_column("standard deviation", justify="right")
-    table.add_column("samples", justify="right")
-
-    per_size_results: list[dict[str, Any]] = []
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("{task.completed}/{task.total}"),
-        TimeElapsedColumn(),
-        console=console,
-        transient=True,
-    ) as progress:
-
-        def measure(input_data: Any, label: str) -> list[float]:
-            return _measure_wall_seconds(
-                runner,
-                problem,
-                input_data,
-                label=label,
-                warmup=warmup,
-                repetitions=repetitions,
-                verify_outputs=verify_outputs,
-                progress=progress,
-                console=console,
-            )
-
-        startup_case = problem.baseline_case(seed=seed)
-        startup_summary = summarize(measure(startup_case.input_data, STARTUP_ROW_LABEL))
-        _add_summary_row(table, f"[dim]{STARTUP_ROW_LABEL}[/dim]", startup_summary)
-        table.add_section()
-
-        for size in size_values:
-            case = problem.benchmark_case(seed=seed, size=size)
-            raw_samples = measure(case.input_data, f"size={size}")
-            reported_samples = (
-                subtract_baseline(raw_samples, startup_summary.mean)
-                if subtract_startup_time
-                else raw_samples
-            )
-            summary = summarize(reported_samples)
-            per_size_results.append(_size_record(size, case.name, summary, raw_samples))
-            _add_summary_row(table, f"{size:,}", summary)
-
-    console.print(table)
-    if subtract_startup_time:
-        console.print(
-            f"Startup time ({format_duration(startup_summary.mean)}, mean of "
-            f"{startup_summary.count} empty-input runs) was subtracted from every sample. "
-            "Negative values mean the work is below the measurement noise."
+        check_sizes(problem, parsed_sizes)
+    except CaseError as error:
+        context.fail(str(error))
+    counting_operations = count_operations and has_trace_format(problem)
+    if count_operations and not counting_operations:
+        context.warn(
+            f"The problem '{problem.name}' does not define operation counts (it has no trace "
+            "format), so --count-operations has no effect."
         )
+    settings = BenchmarkSettings(
+        seed=seed,
+        sizes=parsed_sizes,
+        repetitions=repetitions,
+        warmup=warmup,
+        timeout_seconds=timeout_seconds,
+        verify_outputs=verify_outputs,
+        subtract_startup_time=subtract_startup_time,
+        distributions=_distribution_names(context, problem, distributions or ()),
+        count_operations=counting_operations,
+    )
+    selected = context.select_implementations(
+        problem_name,
+        selectors=selectors,
+        command_texts=command_texts,
+        command_names=command_names,
+        inherit_environment=inherit_environment,
+    )
+    names = [implementation.name for implementation in selected]
+    if reference is not None and reference not in names:
+        listing = ", ".join(f"'{name}'" for name in names)
+        context.fail(f"Unknown reference '{reference}'. Selected implementations: {listing}.")
+    outcome = context.build(selected, build=build)
+    reference_name = reference if reference is not None else outcome.ready[0].name
+
+    with progress_display(context.error_console, with_bar=True) as progress:
+        task_identifier = progress.add_task(
+            "benchmarking", total=total_runs(settings, len(outcome.ready))
+        )
+
+        def show_progress(event: BenchmarkProgress) -> None:
+            if event.completed:
+                progress.update(task_identifier, advance=1)
+                return
+            if event.phase is BenchmarkPhase.STARTUP:
+                where = "startup"
+            else:
+                where = f"{event.distribution}, size {event.size:,}"
+                if event.phase is BenchmarkPhase.OPERATION_COUNT:
+                    where += ", counting operations"
+            description = f"benchmarking {event.implementation_name} ({where})"
+            progress.update(task_identifier, description=escape(description))
+
+        measured_report = run_benchmark(problem, outcome.ready, settings, on_progress=show_progress)
+    report = include_failed_implementations(
+        measured_report,
+        selected,
+        {
+            **{
+                name: BenchmarkFailure(FailureStage.BUILD, str(error))
+                for name, error in outcome.failures.items()
+            },
+            **{
+                name: BenchmarkFailure(FailureStage.CANNOT_RUN, f"Cannot run: {reason}")
+                for name, reason in outcome.unrunnable.items()
+            },
+        },
+    )
+
+    console = context.console
+    if len(report.implementations) == 1:
+        print_single_table(console, report)
     else:
-        console.print(
-            f"Every sample includes about {format_duration(startup_summary.mean)} of startup "
-            "time (the empty-input row). Pass --subtract-startup-time to remove it."
-        )
-
-    plottable_results = [
-        record for record in per_size_results if record["size"] > 0 and record["median_seconds"] > 0
-    ]
-    if plot and len(plottable_results) >= 2:
-        y_label = "median seconds"
-        if subtract_startup_time:
-            y_label += " (startup subtracted)"
-        line_chart(
-            [record["size"] for record in plottable_results],
-            [record["median_seconds"] for record in plottable_results],
-            title=f"{problem_name}: median wall time vs. size",
-            x_label="size",
-            y_label=y_label,
-            log_x=True,
-            log_y=True,
-        )
+        print_comparison_table(console, report, reference_name)
+    if settings.count_operations:
+        print_operation_tables(console, report)
+        print_operation_issues(console, report)
+    print_footer(console, report)
+    print_failures(console, report, excluded=outcome.unavailable)
+    if plot and console.is_terminal:
+        plot_medians(report)
 
     if json_path is not None:
-        report = _build_report(
-            problem_name=problem_name,
-            executable=executable,
-            seed=seed,
-            sizes=size_values,
-            repetitions=repetitions,
-            warmup=warmup,
-            timeout_seconds=timeout_seconds,
-            subtract_startup_time=subtract_startup_time,
-            startup_record=_summary_fields(startup_summary),
-            per_size_results=per_size_results,
-        )
-        json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(report, indent=2, sort_keys=True))
-        console.print(f"[green]Wrote benchmark report to {json_path}[/green]")
+        context.write_json(json_path, benchmark_report_to_json(report), label="benchmark report")
+
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
-def _parse_sizes(raw: str) -> list[int]:
+def _distribution_names(
+    context: CommandContext, problem: Problem[Any, Any, Any], names: Sequence[str]
+) -> tuple[str, ...]:
+    """Return the distribution names to measure, each once; exit if the problem lacks one."""
+    unique = tuple(dict.fromkeys(names))
+    try:
+        select_generators(problem, unique)
+    except CaseError as error:
+        context.fail(str(error))
+    return unique
+
+
+def _parse_sizes(raw: str) -> tuple[int, ...]:
     parts = [part.strip() for part in raw.split(",") if part.strip()]
     if not parts:
         raise typer.BadParameter("At least one size must be provided.")
@@ -243,126 +272,8 @@ def _parse_sizes(raw: str) -> list[int]:
         if value < 0:
             raise typer.BadParameter(f"Sizes must be non-negative, got {value}")
         sizes.append(value)
-    return sizes
-
-
-def _measure_wall_seconds(
-    runner: Runner[Any, Any, Any],
-    problem: Problem[Any, Any, Any],
-    input_data: Any,
-    *,
-    label: str,
-    warmup: int,
-    repetitions: int,
-    verify_outputs: bool,
-    progress: Progress,
-    console: Console,
-) -> list[float]:
-    """Run ``warmup`` discarded and ``repetitions`` measured iterations on one input."""
-    task_id = progress.add_task(label, total=warmup + repetitions)
-    samples: list[float] = []
-    try:
-        for _ in range(warmup):
-            runner.run(input_data, collect_trace=False)
-            progress.update(task_id, advance=1)
-        for _ in range(repetitions):
-            result = runner.run(input_data, collect_trace=False)
-            if verify_outputs:
-                verification = problem.verify(input_data, result.output)
-                if not verification.passed:
-                    console.print(
-                        f"[red]Verification failed for {label}: {verification.message}[/red]"
-                    )
-                    raise typer.Exit(code=1)
-            samples.append(result.wall_seconds)
-            progress.update(task_id, advance=1)
-    except RunnerError as error:
-        console.print(f"[red]Runner error for {label}:[/red] {error}")
-        raise typer.Exit(code=1) from error
-    return samples
-
-
-def _add_summary_row(table: Table, label: str, summary: TimingSummary) -> None:
-    table.add_row(
-        label,
-        format_duration(summary.minimum),
-        format_duration(summary.median),
-        format_duration(summary.standard_deviation),
-        str(summary.count),
-    )
-
-
-def _summary_fields(summary: TimingSummary) -> dict[str, Any]:
-    return {
-        "samples_seconds": list(summary.samples),
-        "minimum_seconds": summary.minimum,
-        "median_seconds": summary.median,
-        "mean_seconds": summary.mean,
-        "standard_deviation_seconds": summary.standard_deviation,
-    }
-
-
-def _size_record(
-    size: int, case_name: str, summary: TimingSummary, raw_samples: list[float]
-) -> dict[str, Any]:
-    # The summary fields describe the reported samples (startup subtracted when
-    # requested); raw_samples_seconds always holds the unadjusted wall times.
-    return {
-        "size": size,
-        "case_name": case_name,
-        **_summary_fields(summary),
-        "raw_samples_seconds": sorted(raw_samples),
-    }
-
-
-def _build_report(
-    *,
-    problem_name: str,
-    executable: Path,
-    seed: int,
-    sizes: list[int],
-    repetitions: int,
-    warmup: int,
-    timeout_seconds: float,
-    subtract_startup_time: bool,
-    startup_record: dict[str, Any],
-    per_size_results: list[dict[str, Any]],
-) -> dict[str, Any]:
-    from algorithm_playground import __version__ as package_version
-
-    return {
-        "problem": problem_name,
-        "executable": {
-            "path": str(executable),
-            "sha256": _sha256_of_file(executable),
-        },
-        "configuration": {
-            "seed": seed,
-            "sizes": sizes,
-            "repetitions": repetitions,
-            "warmup": warmup,
-            "timeout_seconds": timeout_seconds,
-            "subtract_startup_time": subtract_startup_time,
-        },
-        "startup": startup_record,
-        "results": per_size_results,
-        "host": {
-            "platform": platform.platform(),
-            "system": platform.system(),
-            "machine": platform.machine(),
-            "processor": platform.processor(),
-            "python_version": sys.version,
-        },
-        "metadata": {
-            "algorithm_playground_version": package_version,
-            "generated_at": _datetime.datetime.now(tz=_datetime.UTC).isoformat(),
-        },
-    }
-
-
-def _sha256_of_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(64 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    repeated = sorted({size for size in sizes if sizes.count(size) > 1})
+    if repeated:
+        listing = ", ".join(str(size) for size in repeated)
+        raise typer.BadParameter(f"Sizes must be unique, but these were repeated: {listing}")
+    return tuple(sizes)

@@ -1,7 +1,7 @@
 """Built-in problems package.
 
 Importing this package triggers each built-in subpackage to register itself
-in :data:`algorithm_playground.core.registry.REGISTRY` via the
+in the problem registry (:mod:`algorithm_playground.core.registry`) via the
 ``@register_problem`` decorator on the concrete ``Problem`` subclass.
 """
 

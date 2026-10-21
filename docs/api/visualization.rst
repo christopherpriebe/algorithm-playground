@@ -13,3 +13,8 @@ Stepper
 -------
 
 .. automodule:: algorithm_playground.visualization.stepper
+
+Keys
+----
+
+.. automodule:: algorithm_playground.visualization.keys

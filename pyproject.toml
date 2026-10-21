@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,26 +7,27 @@ name = "algorithm-playground"
 version = "0.1.0"
 description = "A learning and benchmarking sandbox for algorithms, with a language-agnostic binary executable contract."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Christopher Priebe" }]
 requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Education",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Benchmark",
 ]
 dependencies = [
-    "typer>=0.12",
+    "typer>=0.19",
     "rich>=13.7",
-    "plotext>=5.3",
+    "plotext>=5.3,<6",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ dev = [
     "ruff>=0.6",
     "ty>=0.0.1a1",
     "pre-commit>=3.7",
+    "pytest-xdist>=3.8.0",
 ]
 docs = [
     "sphinx>=7.0",
@@ -50,11 +52,14 @@ algorithm-playground = "algorithm_playground.cli.main:app"
 
 [project.urls]
 Homepage = "https://github.com/christopherpriebe/algorithm-playground"
-Documentation = "https://github.com/christopherpriebe/algorithm-playground"
+Documentation = "https://github.com/christopherpriebe/algorithm-playground/tree/master/docs"
 Repository = "https://github.com/christopherpriebe/algorithm-playground"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/algorithm_playground"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["uv.lock", ".github", ".pre-commit-config.yaml"]
 
 [tool.ruff]
 line-length = 100
@@ -87,7 +92,9 @@ indent-style = "space"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = ["-ra", "--strict-markers"]
+# Run in parallel; loadscope keeps each module's and class's tests on one worker so shared
+# fixtures are built once. Pass `-n 0` to run serially (for example with `--pdb`).
+addopts = ["-ra", "--strict-markers", "-n", "auto", "--dist", "loadscope"]
 markers = [
     "integration: end-to-end tests that invoke the CLI as a subprocess",
 ]

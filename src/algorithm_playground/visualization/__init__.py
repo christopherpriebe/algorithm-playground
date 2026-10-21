@@ -1,16 +1,24 @@
-"""Terminal-based visualization helpers (plotext charts, rich UI)."""
+"""Terminal-based visualization helpers (plotext charts, rich UI).
+
+This package exports the charts, which a problem uses to draw its frames. The
+interactive stepper and its key input are in
+:mod:`algorithm_playground.visualization.stepper` and
+:mod:`algorithm_playground.visualization.keys`; they are imported only by the
+``debug`` command, so a problem that draws charts does not load them.
+"""
 
 from algorithm_playground.visualization.charts import (
-    bar_chart,
+    BarHighlight,
+    ChartSeries,
     line_chart,
-    side_by_side_bar_charts,
+    render_bar_chart,
+    render_side_by_side_bar_charts,
 )
-from algorithm_playground.visualization.stepper import StepperOptions, step_through
 
 __all__ = [
-    "StepperOptions",
-    "bar_chart",
+    "BarHighlight",
+    "ChartSeries",
     "line_chart",
-    "side_by_side_bar_charts",
-    "step_through",
+    "render_bar_chart",
+    "render_side_by_side_bar_charts",
 ]

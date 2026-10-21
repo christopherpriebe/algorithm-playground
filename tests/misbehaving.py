@@ -1,0 +1,102 @@
+"""A problem whose hooks misbehave on request, to test how the harness copes.
+
+The problem counts the distinct values of an array. It defines no trace format.
+``faulty_problem_class(fault)`` returns a subclass in which the hook named by
+``fault`` raises (``fixtures``, ``generators``, ``verify``, ``serialize_input``
+and ``expected_output`` as they are; ``generator`` for the function of the
+``broken`` distribution, which raises for every size, next to the working
+``uniform`` distribution).
+"""
+
+from __future__ import annotations
+
+import random
+from collections.abc import Iterable, Iterator, Sequence
+from pathlib import Path
+
+from algorithm_playground.authoring import (
+    Fixture,
+    InputGenerator,
+    Problem,
+    VerificationResult,
+    expect_end_of_stream,
+    read_i32_array,
+    read_u64,
+    shrink_sequence,
+    write_i32_array,
+    write_u64,
+)
+
+PROBLEM_NAME = "faulty"
+
+
+def generate_uniform(random_generator: random.Random, size: int) -> list[int]:
+    return [random_generator.randint(0, 9) for _ in range(size)]
+
+
+def generate_broken(random_generator: random.Random, size: int) -> list[int]:
+    raise RuntimeError("generator exploded")
+
+
+class FaultyProblem(Problem[list[int], int, None]):
+    """Counts distinct values; ``fault`` names the hook that raises (empty: none does)."""
+
+    name = PROBLEM_NAME
+    description = "misbehaving [bold]problem[/bold]"
+    fault = ""
+
+    def serialize_input(self, data: list[int], path: Path) -> None:
+        if self.fault == "serialize_input":
+            raise RuntimeError("serialize_input exploded")
+        with path.open("wb") as stream:
+            write_u64(stream, len(data))
+            write_i32_array(stream, data)
+
+    def deserialize_input(self, path: Path) -> list[int]:
+        with path.open("rb") as stream:
+            values = read_i32_array(stream, read_u64(stream))
+            expect_end_of_stream(stream, "input")
+        return values
+
+    def deserialize_output(self, path: Path) -> int:
+        with path.open("rb") as stream:
+            count = read_u64(stream)
+            expect_end_of_stream(stream, "output")
+        return count
+
+    def fixtures(self) -> Iterable[Fixture[list[int]]]:
+        if self.fault == "fixtures":
+            raise RuntimeError("fixtures exploded")
+        yield Fixture("one", [1], "a [red]fixture[/red] description")
+
+    def generators(self) -> Sequence[InputGenerator[list[int]]]:
+        if self.fault == "generators":
+            raise RuntimeError("generators exploded")
+        generators = [InputGenerator("uniform", "uniform values", generate_uniform)]
+        if self.fault == "generator":
+            generators.append(InputGenerator("broken", "always raises", generate_broken))
+        return generators
+
+    def verify(self, input_data: list[int], output: int) -> VerificationResult:
+        if self.fault == "verify":
+            raise RuntimeError("verify exploded")
+        expected = len(set(input_data))
+        return VerificationResult(output == expected, f"expected {expected}, got {output}")
+
+    def expected_output(self, input_data: list[int]) -> int | None:
+        if self.fault == "expected_output":
+            raise RuntimeError("expected_output exploded")
+        return len(set(input_data))
+
+    def shrink(self, input_data: list[int]) -> Iterator[list[int]]:
+        return shrink_sequence(input_data)
+
+
+def faulty_problem_class(fault: str) -> type[FaultyProblem]:
+    """Return the faulty problem in which the hook called ``fault`` raises."""
+    return type("FaultyProblemWithFault", (FaultyProblem,), {"fault": fault})
+
+
+def distinct_count(values: list[int]) -> int:
+    """The behavior of a correct implementation of the faulty problem, for fake runners."""
+    return len(set(values))
