@@ -30,8 +30,9 @@ The interface
 -------------
 
 Subclass :class:`~algorithm_playground.core.Problem` and set the
-``name`` and ``description`` class attributes (``minimum_size``,
-``debug_generator`` and ``operation_names``, below, are optional). The type variables stand for
+``name`` and ``description`` class attributes (``dimensions``,
+``growth_dimension``, ``debug_generator`` and ``operation_names``, below, are
+optional). The type variables stand for
 the in-memory form of an input, of an output, and of a trace (use ``None`` when
 the problem has no trace format); the sorting problem, for instance, is
 ``Problem[list[int], list[int], SortingTrace]``. A problem is created without
@@ -56,35 +57,67 @@ Required members:
 ``generators()``
    Return a sequence of :class:`~algorithm_playground.core.InputGenerator`
    objects: a ``name``, a ``description``, and a function
-   ``generate(random_generator, size)`` that builds an input of the given size
-   from a seeded :class:`random.Random`. Generators are the problem's
-   *distributions*: ``uniform``, ``sorted``, ``few_unique``. The first one is
-   the default, used by ``benchmark`` (unless ``--distribution`` names others,
-   which it then measures one after the other) and for the startup input. A
-   generator has to accept every size from the problem's ``minimum_size`` up.
+   ``generate(random_generator, **size)`` that builds an input of the given size
+   from a seeded :class:`random.Random`. It receives one keyword argument per
+   dimension of the problem, so a problem with the one dimension ``size`` can
+   write ``generate(random_generator, size)``, and a graph problem
+   ``generate(random_generator, *, vertices, edges)``. A generator is called
+   with one keyword argument per dimension, so its parameters must be named
+   after the dimensions (``size`` for a problem that declares none); a
+   parameter with another name is reported by validation. Generators are the
+   problem's *distributions*: ``uniform``, ``sorted``, ``few_unique``. The first
+   one is the default, used by ``benchmark`` (unless ``--distribution`` names
+   others, which it then measures one after the other) and for the startup
+   input. A generator has to accept every combination of values at or above the
+   minimums of the problem's dimensions, and may ignore or clamp a dimension it
+   does not need.
 
 ``verify(input_data, output)``
    Return a :class:`~algorithm_playground.core.VerificationResult`:
    whether ``output`` is a valid answer for ``input_data`` and, if not, a
    message that says why: a failure needs a message (a pass may carry one too).
-   Two more fields are optional and are for failures only. ``focus`` is the position
-   in the output where the first problem is (the index of the first element that
-   differs): failure reports then show a window around it, not the start of a
-   long output. ``category`` is a short name for the kind of wrong answer
+   Two more fields are optional and are for failures only. ``focus`` is the place
+   in the output that matters, in whatever form the problem uses: an index, a
+   vertex, an edge. The sorting problem's is the index of the first element that
+   differs. Failure reports then show that place, not the start of a long
+   output. ``category`` is a short name for the kind of wrong answer
    (``"too short"``, ``"not sorted"``): failures of one category are reported in
    one block, and shrinking keeps a failure of the same category, so give one only
    when the kinds are few and their names do not depend on the input.
 
 Optional class attributes, each with a working default:
 
-``minimum_size`` (default ``0``)
-   The smallest size at which every generator returns a valid input. Set it
-   when an empty input is not valid, for example ``minimum_size = 1`` for a
-   problem whose input needs a start vertex. The startup measurement of
-   ``benchmark`` uses it, ``test`` draws its generated sizes from ``minimum_size``
-   up to ``--maximum-size``, ``benchmark --sizes`` and ``--case`` refuse smaller
-   sizes with a clear message, ``debug`` starts from it, and validation samples the
-   generators from it.
+``dimensions`` (default ``(Dimension("size"),)``)
+   The numbers that make up the size of an input, as a tuple of
+   :class:`~algorithm_playground.core.Dimension` objects. A graph has two:
+
+   .. code-block:: python
+
+      from algorithm_playground.authoring import Dimension
+
+      dimensions = (
+          Dimension("vertices", minimum=1, description="the number of vertices"),
+          Dimension("edges", description="the number of edges", default_maximum=500),
+      )
+
+   A dimension has a ``name`` (a Python identifier, and neither ``seed``
+   nor ``random_generator``), an optional ``description``, a ``minimum``
+   (default ``0``): the smallest value at which every generator returns a valid
+   input, such as ``minimum=1`` for a problem whose input needs a start vertex,
+   and a ``default_maximum`` (default ``100``): the largest value ``test``
+   generates when ``--maximum-size`` is not given. A size is one non-negative
+   integer per dimension. The startup measurement of ``benchmark`` uses the
+   minimums, ``test`` draws each dimension from its minimum up to its maximum
+   (the dimensions vary independently), ``benchmark --sizes`` and ``--case``
+   refuse sizes below a minimum with a clear message, ``debug`` starts from 16 for every
+   dimension, raised to the dimension's minimum, and validation samples the generators from them. A problem that
+   declares nothing has the one dimension ``size``.
+
+``growth_dimension`` (default ``None``)
+   The name of the dimension that the growth row of a benchmark follows (the
+   ``n`` of ``n log n``). The default is the first dimension. For the graph
+   problem above, ``growth_dimension = "edges"`` fits the growth of the time
+   against the number of edges, whatever the vertices do.
 
 ``debug_generator`` (default ``None``)
    The name of the generator that ``debug`` draws its input from when
@@ -117,7 +150,7 @@ Optional methods, each with a working default:
    Text for failure reports, in at most about ``limit`` characters (the harness
    sizes ``limit`` from the width of the terminal). The default is the ``repr``
    cut to ``limit`` characters; override them when a better summary exists ("37
-   values, the first ten are ..."). ``focus`` is the position that ``verify``
+   values, the first ten are ..."). ``focus`` is the place that ``verify``
    gave in its result, or ``None``; it is passed for the actual and for the
    expected output, and a hook that cannot use it ignores it. The helpers
    ``describe_sequence(values, limit, focus=None)`` (a list shown whole, or as
@@ -187,14 +220,14 @@ snapshots and the events).
    single-key navigation. ``input_output_frame`` returns one frame for the input and
    output, or ``None`` (the default), and is shown when there is no usable trace
    or the trace has no frames. ``trace_frames`` returns the steps of a trace, in
-   order, as a sequence of frames (empty by default). A frame has a ``body`` (text, possibly with
-   terminal color codes: the helpers ``render_bar_chart`` and
+   order, as a sequence of frames (empty by default). A frame has a ``body``
+   (text, possibly with terminal color codes: the helpers ``render_bar_chart`` and
    ``render_side_by_side_bar_charts`` of :mod:`algorithm_playground.visualization`
    produce it), a short ``caption`` (the operation that led to the step, running
-   totals) and the ``highlighted_indices`` the body draws emphasized. A trace
-   can have far more steps than are worth drawing in advance, so return a
-   :class:`~algorithm_playground.core.FrameSequence`, which builds a frame
-   only when the stepper asks for it.
+   totals) and the ``highlighted_elements`` (positions, vertices, edges) the body
+   draws emphasized. A trace can have far more steps than are worth drawing in
+   advance, so return a :class:`~algorithm_playground.core.FrameSequence`, which
+   builds a frame only when the stepper asks for it.
 
 The binary helpers of :mod:`algorithm_playground.core`
 (``write_u64``, ``read_i32_array``, and the others, with ``BinaryFormatError``)
@@ -320,16 +353,18 @@ Cases and identifiers
 
 Fixtures and generators produce :class:`~algorithm_playground.core.Case`
 objects, each with a stable identifier (``fixture:empty``,
-``generated:uniform:size=37:seed=1234567``) that failure reports print and
-``--case`` accepts. Because generators receive a seeded
+``generated:uniform:size=37:seed=1234567``; a problem with several dimensions
+names each of them, ``generated:exact:vertices=100:edges=500:seed=1``) that
+failure reports print and ``--case`` accepts. Because generators receive a seeded
 :class:`random.Random`, the identifier is enough to rebuild the input exactly.
 A generator therefore has to take all of its randomness from the generator it
 is given, must return the same input for the same state, and must accept every
-size from the problem's ``minimum_size`` up. Its name appears in identifiers, so
+size from the problem's minimums up. Its name appears in identifiers, so
 constructing an ``InputGenerator`` with a name that is empty or contains a colon
 or whitespace raises ``ValueError``. Numbers in an identifier are written the
 canonical way: ``size=05``, ``seed=+7`` and ``size=1_0`` are refused rather than
-guessed at.
+guessed at. The dimensions of a case may come in any order; the case is rebuilt
+and named in the order the problem declares them.
 
 ``build_cases(problem, plan)`` expands a
 :class:`~algorithm_playground.core.CasePlan` (include fixtures, number of
@@ -388,13 +423,14 @@ list of findings (empty means valid);
    def test_my_problem_is_valid():
        assert_valid_problem(MyProblem())
 
-It checks that the problem has a name and a description, a non-negative integer
-``minimum_size``, a ``debug_generator`` that names one of its generators, and
-``operation_names`` that are unique text; that fixture names are
+It checks that the problem has a name and a description, ``dimensions`` that are
+a non-empty tuple of uniquely named ``Dimension`` objects, a ``growth_dimension``
+that names one of them (or ``None``), a ``debug_generator`` that names one of its
+generators, and ``operation_names`` that are unique text; that fixture names are
 unique (construction already rejects an empty one), every fixture is accepted by
 ``check_input`` and serializes; that generator names are unique (construction
 already rejects one that is unusable in identifiers); that each generator returns
-the same input for the same seed, accepts the sizes from ``minimum_size`` up, and
+the same input for the same seed, accepts the sizes from the minimums up, and
 produces inputs that ``check_input`` accepts and that serialize; that
 ``deserialize_input``, when the problem has it, reads back what ``serialize_input``
 wrote; that ``expected_output``, when it returns something, passes ``verify``

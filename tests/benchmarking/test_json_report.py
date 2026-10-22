@@ -16,6 +16,7 @@ from algorithm_playground.core import (
     FailureStage,
     Implementation,
     ImplementationBenchmark,
+    Size,
     SizeMeasurement,
     convert_benchmark_report_to_json,
     run_benchmark,
@@ -30,12 +31,14 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.sizes import build_sizes
+from helpers.two_dimensions import TwoDimensionProblem, add_pair
 
 
 def build_settings(  # noqa: PLR0913  keyword-only options mirror the fields of BenchmarkSettings
     *,
     seed: int = 0,
-    sizes: tuple[int, ...] = (5,),
+    sizes: tuple[Size, ...] = build_sizes(5),
     repetitions: int = 1,
     timeout_seconds: float = 30.0,
     subtract_startup_time: bool = False,
@@ -74,7 +77,7 @@ def build_benchmark_json(
     return json.loads(json.dumps(convert_benchmark_report_to_json(report)))
 
 
-SETTINGS = build_settings(seed=7, sizes=(5, 10), repetitions=2)
+SETTINGS = build_settings(seed=7, sizes=build_sizes(5, 10), repetitions=2)
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +119,8 @@ def test_the_benchmark_report_has_exactly_the_documented_top_level_keys(
         "format_version",
         "problem",
         "settings",
+        "dimensions",
+        "growth_dimension",
         "implementations",
         "host",
         "metadata",
@@ -127,7 +132,7 @@ def test_the_benchmark_report_names_its_kind_version_and_problem(
 ) -> None:
     """Test the document names its kind, its format version and the problem."""
     assert document["report"] == "benchmark"
-    assert document["format_version"] == BENCHMARK_FORMAT_VERSION == 6
+    assert document["format_version"] == BENCHMARK_FORMAT_VERSION == 7
     assert document["problem"] == "sorting"
 
 
@@ -135,7 +140,7 @@ def test_settings_record_every_benchmark_parameter(document: dict[str, Any]) -> 
     """Test the settings hold the parameters of the benchmark, with the default distribution."""
     assert document["settings"] == {
         "seed": 7,
-        "sizes": [5, 10],
+        "sizes": [{"size": 5}, {"size": 10}],
         "repetitions": 2,
         "warmup": 0,
         "timeout_seconds": 30.0,
@@ -204,7 +209,7 @@ def test_successful_implementation_has_one_result_per_size(
     """Test each size has a result that names its distribution and generated case."""
     results = document["implementations"][0]["results"]
 
-    assert [record["size"] for record in results] == [5, 10]
+    assert [record["size"] for record in results] == [{"size": 5}, {"size": 10}]
     assert [record["distribution"] for record in results] == ["uniform", "uniform"]
     assert [record["case_identifier"] for record in results] == [
         "generated:uniform:size=5:seed=7",
@@ -278,7 +283,7 @@ def test_a_failure_in_one_distribution_names_it() -> None:
         stage=FailureStage.MEASUREMENT,
         message="it broke",
         distribution="sorted",
-        size=10,
+        size=Size(size=10),
     )
     report = BenchmarkReport(
         problem_name="sorting",
@@ -299,7 +304,7 @@ def test_a_failure_in_one_distribution_names_it() -> None:
         {
             "stage": "measurement",
             "distribution": "sorted",
-            "size": 10,
+            "size": {"size": 10},
             "message": "it broke",
         }
     ]
@@ -348,7 +353,7 @@ def test_raw_samples_are_reported_in_run_order() -> None:
     implementation = Implementation(name="a", command=("./a",))
     measurement = SizeMeasurement(
         distribution="uniform",
-        size=5,
+        size=Size(size=5),
         case_identifier="generated:uniform:size=5:seed=7",
         raw_samples=(0.3, 0.1, 0.2),
         summary=summarize([0.3, 0.1, 0.2]),
@@ -375,7 +380,7 @@ def test_raw_samples_are_reported_in_run_order() -> None:
 def distributions_document() -> dict[str, Any]:
     """The report of a quadratic and a crashing implementation over two distributions."""
     settings = build_settings(
-        seed=2, sizes=(100, 200, 400), distributions=("uniform", "sorted")
+        seed=2, sizes=build_sizes(100, 200, 400), distributions=("uniform", "sorted")
     )
     runners = FakeRunners(
         {"quadratic": sort_correctly, "broken": crash},
@@ -401,12 +406,12 @@ def test_each_result_names_its_distribution_and_size(
     results = distributions_document["implementations"][0]["results"]
 
     assert [(record["distribution"], record["size"]) for record in results] == [
-        ("uniform", 100),
-        ("uniform", 200),
-        ("uniform", 400),
-        ("sorted", 100),
-        ("sorted", 200),
-        ("sorted", 400),
+        ("uniform", {"size": 100}),
+        ("uniform", {"size": 200}),
+        ("uniform", {"size": 400}),
+        ("sorted", {"size": 100}),
+        ("sorted", {"size": 200}),
+        ("sorted", {"size": 400}),
     ]
 
 
@@ -452,7 +457,7 @@ def test_an_implementation_without_measurements_has_null_growth(
 
 def test_a_series_that_is_mostly_startup_says_so() -> None:
     """Test growth fitted to costs that barely change with the size is marked unreliable."""
-    settings = build_settings(seed=1, sizes=(100, 200, 400))
+    settings = build_settings(seed=1, sizes=build_sizes(100, 200, 400))
     runners = FakeRunners(
         {"quick": sort_correctly},
         durations={"quick": lambda values: 0.01 + 1e-9 * len(values)},
@@ -470,7 +475,7 @@ def operations_document() -> dict[str, Any]:
     """The report of an implementation with a trace and one without, counting operations."""
     settings = build_settings(
         seed=2,
-        sizes=(8, 16, 32),
+        sizes=build_sizes(8, 16, 32),
         distributions=("reversed",),
         count_operations=True,
     )
@@ -546,7 +551,7 @@ def test_an_implementation_without_a_trace_has_no_operation_growth(
 
 def test_the_measurement_records_why_it_has_no_counts() -> None:
     """Test a trace that cannot be decoded leaves no counts and records the issue."""
-    settings = build_settings(seed=2, sizes=(8,), count_operations=True)
+    settings = build_settings(seed=2, sizes=build_sizes(8), count_operations=True)
     runners = FakeRunners(
         {"a": sort_correctly},
         traces={"a": lambda _: TraceFailure("bad kind 7")},
@@ -560,3 +565,38 @@ def test_the_measurement_records_why_it_has_no_counts() -> None:
         "kind": "malformed trace",
         "message": "bad kind 7",
     }
+
+
+def test_the_report_lists_the_dimensions_and_the_growth_dimension(
+    document: dict[str, Any],
+) -> None:
+    """Test the report names the dimensions of the problem and the one growth follows."""
+    assert document["dimensions"] == [{"name": "size", "minimum": 0}]
+    assert document["growth_dimension"] == "size"
+
+
+def test_sizes_are_recorded_by_dimension() -> None:
+    """Test every size of a problem with two dimensions is written as an object."""
+    sizes = (Size(vertices=2, edges=3), Size(vertices=2, edges=6))
+    report = run_benchmark(
+        TwoDimensionProblem(),
+        build_named_implementations("adder"),
+        build_settings(sizes=sizes),
+        runner_factory=FakeRunners({"adder": add_pair}),
+    )
+
+    document = convert_benchmark_report_to_json(report)
+
+    assert document["dimensions"] == [
+        {"name": "vertices", "minimum": 1},
+        {"name": "edges", "minimum": 0},
+    ]
+    assert document["growth_dimension"] == "edges"
+    assert document["settings"]["sizes"] == [
+        {"vertices": 2, "edges": 3},
+        {"vertices": 2, "edges": 6},
+    ]
+    assert [record["size"] for record in document["implementations"][0]["results"]] == [
+        {"vertices": 2, "edges": 3},
+        {"vertices": 2, "edges": 6},
+    ]

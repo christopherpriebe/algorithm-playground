@@ -13,6 +13,7 @@ What it exports
 
 The interface and its value types
    :class:`~algorithm_playground.core.Problem`,
+   :class:`~algorithm_playground.core.Dimension`,
    :class:`~algorithm_playground.core.Fixture`,
    :class:`~algorithm_playground.core.InputGenerator`,
    :class:`~algorithm_playground.core.VerificationResult`,

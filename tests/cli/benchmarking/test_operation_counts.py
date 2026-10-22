@@ -231,9 +231,9 @@ def test_a_malformed_trace_is_explained_below_the_table(
     stdout = malformed_trace_run.result.stdout
 
     below = stdout[stdout.rindex("┘") :]
-    assert "broken (reversed, size 8): no operation counts, malformed trace:" in below
+    assert "broken (reversed, size=8): no operation counts, malformed trace:" in below
     assert "Unsupported trace kind: 7" in below
-    assert "broken (reversed, size 16)" in below
+    assert "broken (reversed, size=16)" in below
     assert "fine (" not in below
 
 
@@ -296,7 +296,7 @@ def test_the_reasons_are_given_even_when_no_counts_remain_for_a_table(
 
     assert result.exit_code == 0, result.stdout
     assert "No implementation reported operation counts." in result.stdout
-    assert "liar (reversed, size 8): no operation counts, output did not verify" in (
+    assert "liar (reversed, size=8): no operation counts, output did not verify" in (
         result.stdout
     )
 
@@ -466,7 +466,7 @@ def test_the_json_report_carries_counts_and_their_growth(
 
     assert result.exit_code == 0, result.stdout
     report = json.loads(path.read_text())
-    assert report["format_version"] == 6
+    assert report["format_version"] == 7
     assert report["settings"]["count_operations"] is True
     insertion, silent = report["implementations"]
     assert insertion["results"][0]["operation_counts"] == {

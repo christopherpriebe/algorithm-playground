@@ -12,6 +12,7 @@ from algorithm_playground.core import (
     CasePlan,
     Implementation,
     ShrinkOptions,
+    Size,
     TestReport,
     TestRunOptions,
     convert_correctness_report_to_json,
@@ -28,7 +29,10 @@ from helpers.fakes import (
 )
 
 PLAN = CasePlan(
-    random_case_count=1, maximum_size=12, generator_names=("uniform", "sorted"), seed=4
+    random_case_count=1,
+    maximum_size=Size(size=12),
+    generator_names=("uniform", "sorted"),
+    seed=4,
 )
 
 
@@ -103,6 +107,7 @@ def test_the_correctness_report_has_exactly_the_documented_top_level_keys(
         "problem",
         "passed",
         "settings",
+        "dimensions",
         "cases",
         "implementations",
         "host",
@@ -115,7 +120,7 @@ def test_the_correctness_report_names_its_kind_version_and_problem(
 ) -> None:
     """Test the document names its kind, its format version and the problem."""
     assert testing_document["report"] == "test"
-    assert testing_document["format_version"] == TEST_FORMAT_VERSION == 2
+    assert testing_document["format_version"] == TEST_FORMAT_VERSION == 3
     assert testing_document["problem"] == "sorting"
 
 
@@ -127,7 +132,7 @@ def test_the_settings_record_the_plan_the_shrink_limits_and_the_timeout(
         "cases": "planned",
         "seed": 4,
         "random_cases": 1,
-        "maximum_size": 12,
+        "maximum_size": {"size": 12},
         "distributions": ["uniform", "sorted"],
         "include_fixtures": True,
         "shrink": {
@@ -317,7 +322,7 @@ def test_cases_describe_their_origin(testing_document: dict[str, Any]) -> None:
         "identifier": GENERATED_CASE,
         "kind": "generated",
         "distribution": "uniform",
-        "size": 12,
+        "size": {"size": 12},
         "seed": 5,
     }
 
@@ -401,3 +406,23 @@ def test_a_failing_outcome_carries_the_shrunk_input(
         "expected": "[0, 0, 0, 0, 0, 0]",
         "actual": "[0, 0, 0, 0, 0]",
     }
+
+
+def test_the_report_lists_the_dimensions_of_the_problem(
+    testing_document: dict[str, Any],
+) -> None:
+    """Test the report names the dimensions of the problem with their minimums."""
+    assert testing_document["dimensions"] == [{"name": "size", "minimum": 0}]
+
+
+def test_a_plan_without_a_maximum_records_the_default_maximum(
+    single_good_report: TestReport,
+) -> None:
+    """Test a plan that names no maximum size records the default maximum of each dimension."""
+    document = convert_correctness_report_to_json(
+        single_good_report,
+        implementations=build_named_implementations("good"),
+        plan=CasePlan(),
+    )
+
+    assert document["settings"]["maximum_size"] == {"size": 100}

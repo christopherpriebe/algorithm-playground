@@ -33,6 +33,7 @@ from algorithm_playground.core._cases import (
     select_generators,
 )
 from algorithm_playground.core._description import describe_error
+from algorithm_playground.core._dimensions import Size
 from algorithm_playground.core._frames import Frame
 from algorithm_playground.core._problem import AnyProblem, has_trace_format
 from algorithm_playground.core._runner import (
@@ -148,9 +149,14 @@ def _generate_input(
         The generated input.
     """
     size = (
-        max(DEFAULT_SIZE, problem.minimum_size)
+        Size(
+            **{
+                dimension.name: max(DEFAULT_SIZE, dimension.minimum)
+                for dimension in problem.dimensions
+            }
+        )
         if request.size is None
-        else request.size
+        else context.parse_size(problem, request.size)
     )
     name = (
         request.distribution
@@ -194,7 +200,7 @@ class _InputRequest:
     fixture: str | None
     case_identifier: str | None
     input_file: Path | None
-    size: int | None
+    size: str | None
     seed: int | None
     distribution: str | None
 
@@ -361,13 +367,14 @@ def debug_command(  # noqa: PLR0913  every Typer option is a parameter
         ),
     ] = None,
     size: Annotated[
-        int | None,
+        str | None,
         typer.Option(
             "--size",
-            min=0,
             help=(
-                f"Input size to generate (default: {DEFAULT_SIZE}, or the problem's smallest size "
-                "if that is larger). Cannot be combined with --fixture, --case or --input-file."
+                f"Input size to generate (default: {DEFAULT_SIZE} for every dimension, or its "
+                "smallest value if that is larger). A problem with several dimensions takes "
+                "name=N parts joined by colons (for example vertices=10:edges=30). Cannot be "
+                "combined with --fixture, --case or --input-file."
             ),
         ),
     ] = None,

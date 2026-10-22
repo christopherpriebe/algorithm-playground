@@ -6,7 +6,12 @@ of the files the command refers to, the host, and the package version, so a
 result can be tied to the code and machine that produced it. The benchmark
 report adds the timings per distribution and size with the estimated growth
 (exponent and class; and, when counted, the operation counts and their growth).
-The test report lists the cases and, for every implementation, each outcome
+Both reports list the ``dimensions`` of the problem (a ``name`` and a
+``minimum`` each), and a size is always an object with one integer per
+dimension, such as ``{"vertices": 2, "edges": 3}``; the benchmark report also
+names the ``growth_dimension`` that its growth is fitted against.
+The test report records the largest size it generated in ``maximum_size``:
+the one asked for, else the default maximum of every dimension. It lists the cases and, for every implementation, each outcome
 with the failure details, the shrunk input and where the inputs were saved when
 there are any.
 """
@@ -32,6 +37,7 @@ from algorithm_playground.core._cases import (
     FixtureOrigin,
     GeneratedOrigin,
 )
+from algorithm_playground.core._dimensions import Dimension, Size
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._saved_inputs import SavedInputs
 from algorithm_playground.core._single_run import CaseStatus
@@ -48,11 +54,32 @@ __all__ = [
 
 _READ_CHUNK_BYTES = 64 * 1024
 
-BENCHMARK_FORMAT_VERSION = 6
-TEST_FORMAT_VERSION = 2
+BENCHMARK_FORMAT_VERSION = 7
+TEST_FORMAT_VERSION = 3
 
 # A JSON document: the objects of a report mix text, numbers, booleans, lists and nested objects.
 JsonObject = dict[str, Any]
+
+
+def _size_record(size: Size | None) -> JsonObject | None:
+    return None if size is None else dict(size)
+
+
+def _dimensions_record(dimensions: Sequence[Dimension]) -> list[JsonObject]:
+    return [
+        {"name": dimension.name, "minimum": dimension.minimum}
+        for dimension in dimensions
+    ]
+
+
+def _effective_maximum_size(report: TestReport, plan: CasePlan | None) -> Size | None:
+    if plan is None:
+        return None
+    if plan.maximum_size is not None:
+        return plan.maximum_size
+    return Size(
+        **{dimension.name: dimension.default_maximum for dimension in report.dimensions}
+    )
 
 
 def _test_settings_record(report: TestReport, plan: CasePlan | None) -> JsonObject:
@@ -61,7 +88,7 @@ def _test_settings_record(report: TestReport, plan: CasePlan | None) -> JsonObje
         "cases": "explicit" if plan is None else "planned",
         "seed": None if plan is None else plan.seed,
         "random_cases": None if plan is None else plan.random_case_count,
-        "maximum_size": None if plan is None else plan.maximum_size,
+        "maximum_size": _size_record(_effective_maximum_size(report, plan)),
         "distributions": None if plan is None else list(plan.generator_names),
         "include_fixtures": None if plan is None else plan.include_fixtures,
         "shrink": {
@@ -104,7 +131,7 @@ def _case_record(case: AnyCase) -> JsonObject:
             "identifier": case.identifier,
             "kind": "generated",
             "distribution": origin.generator_name,
-            "size": origin.size,
+            "size": _size_record(origin.size),
             "seed": origin.seed,
         }
     return {"identifier": case.identifier, "kind": "shrunk"}
@@ -252,7 +279,7 @@ def _failure_record(failure: BenchmarkFailure) -> JsonObject:
     return {
         "stage": failure.stage.value,
         "distribution": failure.distribution,
-        "size": failure.size,
+        "size": _size_record(failure.size),
         "message": failure.message,
     }
 
@@ -272,7 +299,7 @@ def _measurement_record(measurement: SizeMeasurement) -> JsonObject:
     # requested, sorted); raw_samples_seconds holds the unadjusted wall times in run order.
     return {
         "distribution": measurement.distribution,
-        "size": measurement.size,
+        "size": _size_record(measurement.size),
         "case_identifier": measurement.case_identifier,
         "operation_counts": (
             None
@@ -348,7 +375,7 @@ def convert_benchmark_report_to_json(report: BenchmarkReport) -> JsonObject:
         "problem": report.problem_name,
         "settings": {
             "seed": settings.seed,
-            "sizes": list(settings.sizes),
+            "sizes": [_size_record(size) for size in settings.sizes],
             "repetitions": settings.repetitions,
             "warmup": settings.warmup,
             "timeout_seconds": settings.timeout_seconds,
@@ -357,6 +384,8 @@ def convert_benchmark_report_to_json(report: BenchmarkReport) -> JsonObject:
             "distributions": list(settings.distributions),
             "count_operations": settings.count_operations,
         },
+        "dimensions": _dimensions_record(report.dimensions),
+        "growth_dimension": report.growth_dimension,
         "implementations": [
             _implementation_record(benchmark, settings.distributions)
             for benchmark in report.implementations
@@ -402,6 +431,7 @@ def convert_correctness_report_to_json(  # noqa: PLR0913  one keyword-only optio
         "problem": report.problem_name,
         "passed": report.has_passed and not failed_builds and not cannot_run,
         "settings": _test_settings_record(report, plan),
+        "dimensions": _dimensions_record(report.dimensions),
         "cases": [_case_record(case) for case in report.cases],
         "implementations": [
             _implementation_test_record(

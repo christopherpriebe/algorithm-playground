@@ -12,7 +12,7 @@ def build_numbered_frame(position: int) -> Frame:
     return Frame(
         f"body {position}",
         caption=f"caption {position}",
-        highlighted_indices=(position,),
+        highlighted_elements=(position,),
     )
 
 
@@ -27,11 +27,18 @@ def append_all(history: tuple[str, ...], events: Sequence[str]) -> tuple[str, ..
 
 
 def test_a_frame_needs_only_a_body() -> None:
-    """Test a frame built from a body alone has no caption and no highlighted indices."""
+    """Test a frame built from a body alone has no caption and no highlighted elements."""
     frame = Frame("picture")
 
     assert frame.caption == ""
-    assert frame.highlighted_indices == ()
+    assert frame.highlighted_elements == ()
+
+
+def test_a_frame_highlights_elements_of_any_kind() -> None:
+    """Test the highlighted elements are whatever the problem draws: an edge, a node, a cell."""
+    frame = Frame("picture", highlighted_elements=(("a", "b"), "node 3", (2, 5)))
+
+    assert frame.highlighted_elements == (("a", "b"), "node 3", (2, 5))
 
 
 def test_has_the_given_length_and_builds_frames_by_position() -> None:
@@ -39,7 +46,7 @@ def test_has_the_given_length_and_builds_frames_by_position() -> None:
     frames = FrameSequence(4, build_numbered_frame)
 
     assert len(frames) == 4
-    assert frames[2] == Frame("body 2", caption="caption 2", highlighted_indices=(2,))
+    assert frames[2] == Frame("body 2", caption="caption 2", highlighted_elements=(2,))
     assert frames[-1] == build_numbered_frame(3)
 
 

@@ -19,6 +19,7 @@ from algorithm_playground.core import (
     InputGenerator,
     Problem,
     RunnerError,
+    Size,
     count_total_runs,
     generate_case,
     get_default_generator,
@@ -32,9 +33,14 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.sizes import build_sizes
+from helpers.two_dimensions import TwoDimensionProblem, add_pair
 
 
-def fail_to_generate(_random_generator: random.Random, _size: int) -> list[int]:
+def fail_to_generate(
+    _random_generator: random.Random,
+    size: int,  # noqa: ARG001  signature fixed by the generator contract
+) -> list[int]:
     """Fail for every size, as a generator that is broken."""
     message = "generator exploded"
     raise RuntimeError(message)
@@ -90,7 +96,7 @@ def build_settings(**overrides: object) -> BenchmarkSettings:
     """Build benchmark settings of two small sizes, with the given fields replaced."""
     values: dict[str, Any] = {
         "seed": 1,
-        "sizes": (5, 10),
+        "sizes": build_sizes(5, 10),
         "repetitions": 1,
         "warmup": 0,
         "timeout_seconds": 30.0,
@@ -122,7 +128,7 @@ def run_fake_benchmark(
 
 
 def run_with_failing_reversed_generator(
-    behaviors: dict[str, Any], fails_from: int, sizes: tuple[int, ...]
+    behaviors: dict[str, Any], fails_from: int, sizes: tuple[Size, ...]
 ) -> BenchmarkReport:
     """Benchmark three distributions where ``reversed`` fails to generate from a size on."""
     problem = type(
@@ -158,8 +164,7 @@ def steady_report(tmp_path_factory: pytest.TempPathFactory) -> BenchmarkReport:
             r"Distributions.*unique.*sorted",
         ),
         ({"sizes": ()}, "At least one size"),
-        ({"sizes": (5, -1)}, "non-negative"),
-        ({"sizes": (4, 8, 4)}, r"unique.*\[4\]"),
+        ({"sizes": build_sizes(4, 8, 4)}, r"unique.*size=4"),
         ({"repetitions": 0}, "Repetitions"),
         ({"warmup": -1}, "Warmup"),
         ({"timeout_seconds": 0.0}, "Timeout"),
@@ -169,7 +174,6 @@ def steady_report(tmp_path_factory: pytest.TempPathFactory) -> BenchmarkReport:
     ids=[
         "duplicate-distributions",
         "no-sizes",
-        "negative-size",
         "duplicate-sizes",
         "no-repetitions",
         "negative-warmup",
@@ -186,7 +190,7 @@ def test_rejects_invalid_values(overrides: dict[str, object], message: str) -> N
 
 def test_counts_warmup_and_repetitions_for_every_size_and_the_startup() -> None:
     """Test the total covers warmup and repetitions at every size and at the startup."""
-    settings = build_settings(sizes=(5, 10, 20), repetitions=3, warmup=2)
+    settings = build_settings(sizes=build_sizes(5, 10, 20), repetitions=3, warmup=2)
 
     runs = count_total_runs(settings, 2)
 
@@ -198,7 +202,7 @@ def test_counting_operations_adds_one_run_per_implementation_distribution_and_si
 ):
     """Test counting operations adds one run for each implementation, distribution and size."""
     settings = build_settings(
-        sizes=(5, 10, 20),
+        sizes=build_sizes(5, 10, 20),
         repetitions=3,
         warmup=2,
         distributions=("uniform", "sorted"),
@@ -215,7 +219,7 @@ def test_every_distribution_is_measured_at_every_size_but_the_startup_only_once(
 ):
     """Test every distribution runs at every size while the startup runs once."""
     settings = build_settings(
-        sizes=(5, 10, 20),
+        sizes=build_sizes(5, 10, 20),
         repetitions=3,
         warmup=2,
         distributions=("uniform", "sorted"),
@@ -253,7 +257,9 @@ def test_measures_every_size_with_every_repetition(
 ) -> None:
     """Test each size has one measurement whose summary covers every repetition."""
     for item in steady_report.implementations:
-        assert [measurement.size for measurement in item.measurements] == [5, 10]
+        assert [measurement.size for measurement in item.measurements] == list(
+            build_sizes(5, 10)
+        )
         for measurement in item.measurements:
             assert len(measurement.raw_samples) == 2
             assert measurement.summary.count == 2
@@ -269,7 +275,7 @@ def test_names_the_generated_case_of_every_measurement(
         for measurement in item.measurements:
             assert (
                 measurement.case_identifier
-                == f"generated:uniform:size={measurement.size}:seed=1"
+                == f"generated:uniform:{measurement.size}:seed=1"
             )
 
 
@@ -302,21 +308,25 @@ def test_rejects_an_empty_implementation_list() -> None:
 
 def test_inputs_come_from_the_default_generator_with_the_settings_seed() -> None:
     """Test the runners receive the inputs of the default generator for the seed and sizes."""
-    _, runners, _ = run_fake_benchmark({"a": sort_correctly}, sizes=(3, 6), seed=9)
+    _, runners, _ = run_fake_benchmark(
+        {"a": sort_correctly}, sizes=build_sizes(3, 6), seed=9
+    )
     generator = get_default_generator(SortingProblem())
 
     startup, *sized = runners.collect_inputs_of("a")
 
     assert startup == []
     assert sized == [
-        generate_case(generator, size=3, seed=9).input_data,
-        generate_case(generator, size=6, seed=9).input_data,
+        generate_case(generator, size=Size(size=3), seed=9).input_data,
+        generate_case(generator, size=Size(size=6), seed=9).input_data,
     ]
 
 
 def test_measurements_name_the_cases_of_the_default_generator() -> None:
     """Test each measurement names the generated case of the default generator."""
-    report, _, _ = run_fake_benchmark({"a": sort_correctly}, sizes=(3, 6), seed=9)
+    report, _, _ = run_fake_benchmark(
+        {"a": sort_correctly}, sizes=build_sizes(3, 6), seed=9
+    )
 
     identifiers = [
         measurement.case_identifier
@@ -346,7 +356,8 @@ def flaky_report() -> tuple[BenchmarkReport, FakeRunners]:
         return sorted(values)
 
     report, runners, _ = run_fake_benchmark(
-        {"flaky": fail_above_seven, "steady": sort_correctly}, sizes=(5, 10, 20)
+        {"flaky": fail_above_seven, "steady": sort_correctly},
+        sizes=build_sizes(5, 10, 20),
     )
     return report, runners
 
@@ -358,7 +369,7 @@ def test_a_failure_names_the_size_and_the_error(
     flaky = flaky_report[0].implementations[0]
 
     assert flaky.failure is not None
-    assert "size 10" in flaky.failure
+    assert "size=10" in flaky.failure
     assert "kaboom" in flaky.failure
 
 
@@ -370,7 +381,7 @@ def test_a_failing_implementation_keeps_its_startup_and_earlier_sizes_and_stops(
     flaky = report.implementations[0]
 
     assert flaky.startup is not None
-    assert [measurement.size for measurement in flaky.measurements] == [5]
+    assert [measurement.size for measurement in flaky.measurements] == [Size(size=5)]
     # startup, size 5, failed size 10
     assert len(runners.collect_inputs_of("flaky")) == 1 + 1 + 1
 
@@ -382,12 +393,14 @@ def test_a_failing_implementation_does_not_stop_the_others(
     steady = flaky_report[0].implementations[1]
 
     assert steady.failure is None
-    assert [measurement.size for measurement in steady.measurements] == [5, 10, 20]
+    assert [measurement.size for measurement in steady.measurements] == list(
+        build_sizes(5, 10, 20)
+    )
 
 
 def test_repetitions_are_interleaved_across_implementations() -> None:
     """Test every measurement point runs all implementations before the next run."""
-    settings = build_settings(sizes=(5,), repetitions=2, warmup=1)
+    settings = build_settings(sizes=build_sizes(5), repetitions=2, warmup=1)
     runners = FakeRunners({"a": sort_correctly, "b": sort_correctly})
 
     run_benchmark(
@@ -406,7 +419,7 @@ def test_repetitions_are_interleaved_across_implementations() -> None:
 
 def test_the_number_of_runs_matches_the_total_and_the_progress() -> None:
     """Test the runs made and the progress reported both equal the planned total of runs."""
-    settings = build_settings(sizes=(5,), repetitions=2, warmup=1)
+    settings = build_settings(sizes=build_sizes(5), repetitions=2, warmup=1)
     runners = FakeRunners({"a": sort_correctly, "b": sort_correctly})
     events: list[BenchmarkProgress] = []
 
@@ -446,12 +459,12 @@ def test_a_failure_during_startup_does_not_stop_the_other_implementations() -> N
 
 def test_a_verification_failure_is_recorded() -> None:
     """Test an output that does not verify is recorded as a failure without measurements."""
-    report, _, _ = run_fake_benchmark({"unsorted": list}, sizes=(50,))
+    report, _, _ = run_fake_benchmark({"unsorted": list}, sizes=build_sizes(50))
 
     result = report.implementations[0]
 
     assert result.failure is not None
-    assert result.failure.startswith("Verification failed for size 50")
+    assert result.failure.startswith("Verification failed for size=50")
     assert result.measurements == ()
 
 
@@ -462,7 +475,7 @@ def test_an_exception_in_verification_is_recorded_as_a_failure(
     report = run_benchmark(
         exploding_problem,
         build_named_implementations("sorter"),
-        build_settings(sizes=(5,)),
+        build_settings(sizes=build_sizes(5)),
         runner_factory=FakeRunners({"sorter": sort_correctly}),
     )
 
@@ -477,7 +490,7 @@ def test_an_exception_in_verification_is_recorded_as_a_failure(
 def test_verification_can_be_disabled() -> None:
     """Test a wrong output is measured and the report passes when verification is off."""
     report, _, _ = run_fake_benchmark(
-        {"unsorted": list}, sizes=(50,), verify_outputs=False
+        {"unsorted": list}, sizes=build_sizes(50), verify_outputs=False
     )
 
     assert report.has_passed
@@ -487,7 +500,7 @@ def test_verification_can_be_disabled() -> None:
 def test_progress_events_come_in_started_and_completed_pairs_with_the_phase() -> None:
     """Test each run reports a started and a completed event that name its phase and size."""
     _, _, events = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(4,), repetitions=2, warmup=1
+        {"a": sort_correctly}, sizes=build_sizes(4), repetitions=2, warmup=1
     )
 
     assert [(event.phase, event.size, event.completed) for event in events] == [
@@ -497,12 +510,12 @@ def test_progress_events_come_in_started_and_completed_pairs_with_the_phase() ->
         (BenchmarkPhase.STARTUP, None, True),
         (BenchmarkPhase.STARTUP, None, False),
         (BenchmarkPhase.STARTUP, None, True),
-        (BenchmarkPhase.WARMUP, 4, False),
-        (BenchmarkPhase.WARMUP, 4, True),
-        (BenchmarkPhase.MEASUREMENT, 4, False),
-        (BenchmarkPhase.MEASUREMENT, 4, True),
-        (BenchmarkPhase.MEASUREMENT, 4, False),
-        (BenchmarkPhase.MEASUREMENT, 4, True),
+        (BenchmarkPhase.WARMUP, Size(size=4), False),
+        (BenchmarkPhase.WARMUP, Size(size=4), True),
+        (BenchmarkPhase.MEASUREMENT, Size(size=4), False),
+        (BenchmarkPhase.MEASUREMENT, Size(size=4), True),
+        (BenchmarkPhase.MEASUREMENT, Size(size=4), False),
+        (BenchmarkPhase.MEASUREMENT, Size(size=4), True),
     ]
     assert {event.implementation_name for event in events} == {"a"}
 
@@ -519,7 +532,7 @@ def test_each_implementation_subtracts_its_own_startup() -> None:
     report, _, _ = run_fake_benchmark(
         {"fast": sort_correctly, "slow": sort_correctly},
         durations={"fast": 0.010, "slow": 0.300},
-        sizes=(5,),
+        sizes=build_sizes(5),
         repetitions=3,
         subtract_startup_time=True,
     )
@@ -548,7 +561,9 @@ def test_samples_are_not_adjusted_without_the_flag() -> None:
 def failing_reversed_report() -> BenchmarkReport:
     """The report in which the reversed generator fails for every size."""
     return run_with_failing_reversed_generator(
-        {"a": sort_correctly, "b": sort_correctly}, fails_from=0, sizes=(5, 10)
+        {"a": sort_correctly, "b": sort_correctly},
+        fails_from=0,
+        sizes=build_sizes(5, 10),
     )
 
 
@@ -582,7 +597,7 @@ def test_the_failure_message_names_the_generator_and_the_cause(
 
     assert messages == {
         (
-            "Could not generate the input of size 5 for the distribution 'reversed': "
+            "Could not generate the input size=5 for the distribution 'reversed': "
             "The problem's 'reversed' generator hook raised RuntimeError: generator exploded."
         )
     }
@@ -594,10 +609,10 @@ def test_the_other_distributions_are_still_measured(
     """Test the distributions whose generators work are still measured."""
     for item in failing_reversed_report.implementations:
         assert [(m.distribution, m.size) for m in item.measurements] == [
-            ("uniform", 5),
-            ("uniform", 10),
-            ("sorted", 5),
-            ("sorted", 10),
+            ("uniform", Size(size=5)),
+            ("uniform", Size(size=10)),
+            ("sorted", Size(size=5)),
+            ("sorted", Size(size=10)),
         ]
         assert item.startup is not None
 
@@ -608,29 +623,29 @@ def test_the_cells_of_the_failed_distribution_are_failed(
     """Test every size of the failed distribution has the status failed."""
     for item in failing_reversed_report.implementations:
         assert item.startup_status() is CellStatus.MEASURED
-        assert [item.status_at("reversed", size) for size in (5, 10)] == [
+        assert [item.status_at("reversed", size) for size in build_sizes(5, 10)] == [
             CellStatus.FAILED
         ] * 2
-        assert item.status_at("sorted", 5) is CellStatus.MEASURED
+        assert item.status_at("sorted", Size(size=5)) is CellStatus.MEASURED
 
 
 def test_the_sizes_measured_before_the_failure_stay_and_the_rest_are_failed() -> None:
     """Test sizes measured before a generator fails stay measured and later sizes fail."""
     report = run_with_failing_reversed_generator(
-        {"a": sort_correctly}, fails_from=10, sizes=(5, 10, 20)
+        {"a": sort_correctly}, fails_from=10, sizes=build_sizes(5, 10, 20)
     )
     (item,) = report.implementations
 
     assert [(m.distribution, m.size) for m in item.measurements_for("reversed")] == [
-        ("reversed", 5)
+        ("reversed", Size(size=5))
     ]
-    assert [item.status_at("reversed", size) for size in (5, 10, 20)] == [
+    assert [item.status_at("reversed", size) for size in build_sizes(5, 10, 20)] == [
         CellStatus.MEASURED,
         CellStatus.FAILED,
         CellStatus.FAILED,
     ]
     (failure,) = item.failures
-    assert "input of size 10" in failure.message
+    assert "input size=10" in failure.message
 
 
 def test_an_implementation_that_already_failed_in_the_distribution_keeps_its_own_failure() -> (
@@ -647,15 +662,15 @@ def test_an_implementation_that_already_failed_in_the_distribution_keeps_its_own
     report = run_with_failing_reversed_generator(
         {"flaky": fails_on_the_first_size, "steady": sort_correctly},
         fails_from=10,
-        sizes=(5, 10),
+        sizes=build_sizes(5, 10),
     )
     flaky, steady = report.implementations
 
     assert [(f.stage, f.size) for f in flaky.failures] == [
-        (FailureStage.MEASUREMENT, 5)
+        (FailureStage.MEASUREMENT, Size(size=5))
     ]
     assert [f.stage for f in steady.failures] == [FailureStage.DISTRIBUTION]
-    assert flaky.status_at("reversed", 10) is CellStatus.SKIPPED
+    assert flaky.status_at("reversed", Size(size=10)) is CellStatus.SKIPPED
 
 
 def test_an_implementation_with_a_failed_startup_gets_no_distribution_failure() -> None:
@@ -668,7 +683,9 @@ def test_an_implementation_with_a_failed_startup_gets_no_distribution_failure() 
         return sorted(values)
 
     report = run_with_failing_reversed_generator(
-        {"broken": cannot_start, "steady": sort_correctly}, fails_from=0, sizes=(5,)
+        {"broken": cannot_start, "steady": sort_correctly},
+        fails_from=0,
+        sizes=build_sizes(5),
     )
     broken, steady = report.implementations
 
@@ -679,7 +696,7 @@ def test_an_implementation_with_a_failed_startup_gets_no_distribution_failure() 
 def test_a_failed_startup_row_is_not_confused_with_a_failed_distribution() -> None:
     """Test a failed distribution does not make the startup cell failed."""
     report = run_with_failing_reversed_generator(
-        {"a": sort_correctly}, fails_from=0, sizes=(5,)
+        {"a": sort_correctly}, fails_from=0, sizes=build_sizes(5)
     )
 
     status = report.implementations[0].startup_status()
@@ -693,7 +710,7 @@ def test_the_generator_of_the_startup_input_has_to_work() -> None:
         run_fake_benchmark(
             {"a": sort_correctly},
             problem=ProblemWhoseDefaultGeneratorRaises(),
-            sizes=(3,),
+            sizes=build_sizes(3),
         )
 
 
@@ -703,5 +720,48 @@ def test_a_generators_hook_that_raises_is_a_hook_error() -> None:
         run_fake_benchmark(
             {"a": sort_correctly},
             problem=ProblemWhoseGeneratorsHookRaises(),
-            sizes=(3,),
+            sizes=build_sizes(3),
         )
+
+
+def test_measurements_carry_the_size_of_every_dimension() -> None:
+    """Test a problem with two dimensions is measured at the exact sizes given, in order."""
+    sizes = (Size(vertices=2, edges=3), Size(vertices=4, edges=6))
+    runners = FakeRunners({"adder": add_pair})
+
+    report = run_benchmark(
+        TwoDimensionProblem(),
+        build_named_implementations("adder"),
+        build_settings(sizes=sizes),
+        runner_factory=runners,
+    )
+
+    item = report.implementations[0]
+    assert [measurement.size for measurement in item.measurements] == list(sizes)
+    assert [measurement.case_identifier for measurement in item.measurements] == [
+        "generated:exact:vertices=2:edges=3:seed=1",
+        "generated:exact:vertices=4:edges=6:seed=1",
+    ]
+    assert item.measurement_at("exact", Size(edges=6, vertices=4)) is not None
+    assert runners.collect_inputs_of("adder") == [(1, 0), (2, 3), (4, 6)]
+
+
+def test_sizes_that_differ_only_in_order_are_duplicates() -> None:
+    """Test two sizes with the same values in another order are the same size."""
+    with pytest.raises(ValueError, match=r"unique.*vertices=1:edges=2"):
+        build_settings(sizes=(Size(vertices=1, edges=2), Size(edges=2, vertices=1)))
+
+
+def test_sizes_are_measured_in_the_declared_order_of_their_dimensions() -> None:
+    """Test a size given in another order is recorded in the order the problem declares."""
+    report = run_benchmark(
+        TwoDimensionProblem(),
+        build_named_implementations("adder"),
+        build_settings(sizes=(Size(edges=3, vertices=2),)),
+        runner_factory=FakeRunners({"adder": add_pair}),
+    )
+
+    (measurement,) = report.implementations[0].measurements
+    assert measurement.case_identifier == "generated:exact:vertices=2:edges=3:seed=1"
+    assert str(measurement.size) == "vertices=2:edges=3"
+    assert str(report.settings.sizes[0]) == "vertices=2:edges=3"

@@ -250,7 +250,7 @@ Input generators
 
 A generator draws all of its randomness from the :class:`random.Random` it is
 given, so two invocations with the same ``(seed, size)`` return identical
-arrays; it accepts size 0 (the sorting problem's ``minimum_size``) and returns
+arrays; it accepts size 0 (the minimum of the sorting problem's one dimension, ``size``) and returns
 only values within the i32 range. The first one, ``uniform``, is the default:
 ``benchmark`` uses it unless ``--distribution`` names others, and the startup
 measurement uses it at size 0. ``test`` draws its generated cases from all of

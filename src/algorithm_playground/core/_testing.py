@@ -36,6 +36,7 @@ from algorithm_playground.core._cases import (
     ShrunkOrigin,
 )
 from algorithm_playground.core._description import describe_error
+from algorithm_playground.core._dimensions import Dimension
 from algorithm_playground.core._errors import AlgorithmPlaygroundError
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem
@@ -114,7 +115,7 @@ def _describe_safely(describe: Callable[[], str]) -> str:
 
 
 def _describe_output(
-    problem: AnyProblem, output: object, *, limit: int, focus: int | None
+    problem: AnyProblem, output: object, *, limit: int, focus: object | None
 ) -> str:
     if focus is None:
         return problem.describe_output(output, limit=limit)
@@ -122,7 +123,7 @@ def _describe_output(
 
 
 def _describe_expected_output(
-    problem: AnyProblem, input_data: object, *, limit: int, focus: int | None
+    problem: AnyProblem, input_data: object, *, limit: int, focus: object | None
 ) -> str | None:
     try:
         expected = problem.expected_output(input_data)
@@ -267,6 +268,7 @@ class TestReport:
     cases: tuple[AnyCase, ...]
     outcomes: tuple[CaseOutcome, ...]
     settings: TestSettings = field(default_factory=TestSettings)
+    dimensions: tuple[Dimension, ...] = (Dimension("size"),)
     _index: dict[tuple[str, str], CaseOutcome] = field(
         init=False, repr=False, compare=False, default_factory=dict
     )
@@ -732,7 +734,7 @@ def describe_failure(
     """Describe a failing attempt through the problem's hooks.
 
     A hook that raises does not take the description down; its text says that it
-    could not describe. The position ``verify`` named as the focus is passed to
+    could not describe. The focus ``verify`` named is passed to
     ``describe_output``, for the expected output as well as for the actual one.
 
     Args:
@@ -814,4 +816,5 @@ def run_tests(  # noqa: PLR0913  the problem, implementations and cases plus thr
         cases=tuple(cases),
         outcomes=outcomes,
         settings=test_run.settings,
+        dimensions=tuple(problem.dimensions),
     )

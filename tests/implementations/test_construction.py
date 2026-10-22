@@ -13,6 +13,7 @@ import pytest
 from algorithm_playground.core import (
     BenchmarkSettings,
     Implementation,
+    Size,
     resolve_case,
     run_benchmark,
     run_tests,
@@ -48,7 +49,7 @@ def run_benchmark_on(implementations: Sequence[Implementation]) -> list[str]:
     """Benchmark on fake runners and return the names of the implementations measured."""
     settings = BenchmarkSettings(
         seed=1,
-        sizes=(3,),
+        sizes=(Size(size=3),),
         repetitions=1,
         warmup=0,
         timeout_seconds=30.0,

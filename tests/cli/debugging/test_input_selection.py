@@ -15,6 +15,7 @@ from helpers.support import (
     invoke_cli,
     read_logged_inputs,
 )
+from helpers.two_dimensions import register_two_dimension_problem, write_pair_adder
 
 pytestmark = pytest.mark.integration
 
@@ -476,3 +477,25 @@ def test_malformed_trace_is_reported_then_falls_back(
     assert "Trace file is malformed" in result.stderr
     assert "did not produce a usable trace" in result.stderr
     assert result.stdout.count("Output verified.") == 1
+
+
+def test_a_size_names_every_dimension_of_the_problem(tmp_path: Path) -> None:
+    """Test debug takes a size with one value per dimension of the problem."""
+    name = register_two_dimension_problem()
+    adder = write_pair_adder(tmp_path / "adder.py")
+
+    result = invoke_cli("debug", name, str(adder), "--size", "vertices=3:edges=4")
+
+    assert result.exit_code == 0, result.stderr
+    assert "Output verified." in result.stdout
+
+
+def test_a_plain_number_is_a_usage_error_for_several_dimensions(tmp_path: Path) -> None:
+    """Test debug refuses a bare number as the size of a problem with two dimensions."""
+    name = register_two_dimension_problem()
+    adder = write_pair_adder(tmp_path / "adder.py")
+
+    result = invoke_cli("debug", name, str(adder), "--size", "5")
+
+    assert_exits_with(result, 2)
+    assert "vertices=N:edges=N" in result.stderr

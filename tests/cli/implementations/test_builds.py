@@ -267,7 +267,10 @@ def test_benchmark_records_the_failed_build_in_the_json_report(
     good, bad = benchmark_run.report["implementations"]
 
     assert (good["name"], good["failures"]) == ("good", [])
-    assert [record["size"] for record in good["results"]] == [4, 8]
+    assert [record["size"] for record in good["results"]] == [
+        {"size": 4},
+        {"size": 8},
+    ]
     assert bad["name"] == "bad"
     assert [failure["stage"] for failure in bad["failures"]] == ["build"]
     assert "compile exploded" in bad["failures"][0]["message"]

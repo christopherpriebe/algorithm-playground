@@ -51,7 +51,9 @@ What each part does:
   rows of the ``test`` matrix.
 * ``generators`` returns the seeded input generators. A generator is a name, a
   description, and a function from a :class:`random.Random` and a size to an
-  input. The first one is the default (``benchmark`` uses it unless
+  input. It is called with one keyword argument per dimension of the problem, so
+  its parameters must be named after the dimensions (``size`` unless you declare
+  others); a parameter with another name is reported by validation. The first one is the default (``benchmark`` uses it unless
   ``--distribution`` names others). The harness
   hands each generated case its own seed, so every case can be rebuilt from its
   identifier.
@@ -193,7 +195,7 @@ satisfy ``check_input``, and whether ``shrink`` candidates serialize.
        assert_valid_problem(DistinctCountProblem())
 
 A finding is a sentence that names what is wrong, for example
-``generator 'uniform' at size 5 returned different inputs for the same seed``
+``generator 'uniform' at size=5 returned different inputs for the same seed``
 (the generator used randomness that did not come from its argument) or
 ``fixture 'huge' does not serialize: ValueError: ...``.
 
@@ -202,8 +204,10 @@ Where to go next
 
 * Override ``describe_input`` and ``describe_output`` when the default
   ``repr`` is too long to read in a report; ``describe_sequence`` shows a long
-  list as its first items and its length, or as a window around the position
-  ``verify`` named in ``VerificationResult.focus``.
+  list as its first items and its length, or, when the focus is an index, as a
+  window around it. The focus is whatever your problem uses to name a place (a
+  vertex, an edge, a cell); the sorting problem's is the index of the first
+  element that differs.
 * Write the rule that every input must keep (an array that has to be sorted) as
   ``check_input``, so that shrinking skips candidates that break it.
 * Add more generators that stress different shapes of input; each one is a
@@ -222,8 +226,15 @@ Where to go next
   single-key navigation; you never write the stepper. ``read_sections`` and
   ``read_records`` read a trace file, and ``StateTimeline`` replays events to the
   state after any one of them.
-* Set ``minimum_size`` when an input of size 0 is not valid; every generator
-  then has to accept sizes from there, and the startup measurement, the
-  generated test sizes and ``debug`` start from it.
+* Declare ``dimensions`` when the size of an input is not one number, or when an
+  input of size 0 is not valid. A graph problem, for example, declares
+  ``dimensions = (Dimension("vertices", minimum=1), Dimension("edges"))`` and
+  ``growth_dimension = "edges"``, so that its generators are called as
+  ``generate(random_generator, *, vertices, edges)``, a size on the command line
+  is written ``vertices=100:edges=500``, and the growth of a benchmark is fitted
+  against the edges. Every generator then has to accept every combination of
+  values from the minimums up, and the startup measurement, the generated test
+  sizes and ``debug`` start from the minimums. ``Dimension`` comes from
+  ``algorithm_playground.authoring`` like the rest.
 * Set ``debug_generator`` to the name of the generator whose inputs make the
   best pictures, and ``operation_names`` to the operations your trace counts.

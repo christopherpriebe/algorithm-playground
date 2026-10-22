@@ -4,13 +4,15 @@
 running any implementation, and returns a list of findings (empty means
 valid). It checks that:
 
-* the problem has a name and a description, a non-negative integer
-  ``minimum_size``, a ``debug_generator`` that names one of its generators (or
-  ``None``), and ``operation_names`` that are unique text;
+* the problem has a name and a description, ``dimensions`` that are a
+  non-empty tuple of uniquely named :class:`~algorithm_playground.core.Dimension`
+  objects, a ``growth_dimension`` that names one of them (or ``None``), a
+  ``debug_generator`` that names one of its generators (or ``None``), and
+  ``operation_names`` that are unique text;
 * fixtures exist, have unique names, are accepted by ``check_input`` and
   serialize;
 * generators exist, have unique names, return the same input for the same
-  seed, accept the sizes from ``minimum_size`` up, and produce inputs that
+  seed, accept the sizes from the minimums of the dimensions up, and produce inputs that
   ``check_input`` accepts and that serialize;
 * ``deserialize_input``, when a problem provides it, reads back the input that
   ``serialize_input`` wrote;
@@ -40,6 +42,7 @@ from algorithm_playground.core._cases import (
     InputGenerator,
 )
 from algorithm_playground.core._description import describe_error
+from algorithm_playground.core._dimensions import Dimension, Size
 from algorithm_playground.core._frames import Frame
 from algorithm_playground.core._problem import AnyProblem, has_input_reader
 
@@ -112,7 +115,7 @@ class _Validator:
                 self._record(
                     f"the class attribute '{attribute}' must be a non-empty string"
                 )
-        self._check_minimum_size()
+        dimensions = self._check_dimensions()
 
         samples: list[tuple[str, object]] = [
             (f"fixture '{fixture.name}'", fixture.input_data)
@@ -121,8 +124,9 @@ class _Validator:
         generators = self._generators()
         self._check_debug_generator(generators)
         self._check_operation_names()
-        for generator in generators:
-            samples.extend(self._generated_samples(generator))
+        if dimensions is not None:
+            for generator in generators:
+                samples.extend(self._generated_samples(generator, dimensions))
 
         for subject, input_data in samples:
             self._check_valid(subject, input_data)
@@ -132,20 +136,40 @@ class _Validator:
                 self._check_shrink(subject, input_data)
         return self._findings
 
-    def _minimum_size(self) -> int:
-        value = getattr(type(self._problem), "minimum_size", 0)
-        return (
-            value
-            if isinstance(value, int) and not isinstance(value, bool) and value >= 0
-            else 0
-        )
+    def _check_dimensions(self) -> tuple[Dimension, ...] | None:
+        """Check the declaration of the dimensions.
 
-    def _check_minimum_size(self) -> None:
-        value = getattr(type(self._problem), "minimum_size", 0)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        Returns:
+            The dimensions, or ``None`` when the declaration cannot be used to sample generators.
+        """
+        problem_class = type(self._problem)
+        dimensions = getattr(problem_class, "dimensions", None)
+        if (
+            not isinstance(dimensions, tuple)
+            or not dimensions
+            or not all(isinstance(dimension, Dimension) for dimension in dimensions)
+        ):
             self._record(
-                f"the class attribute 'minimum_size' must be an integer of at least 0, got {value!r}"
+                "the class attribute 'dimensions' must be a non-empty tuple of Dimension "
+                f"objects, got {dimensions!r}"
             )
+            return None
+        usable = True
+        names: set[str] = set()
+        for dimension in dimensions:
+            if dimension.name in names:
+                self._record(
+                    f"the dimension name '{dimension.name}' is used more than once"
+                )
+                usable = False
+            names.add(dimension.name)
+        growth = getattr(problem_class, "growth_dimension", None)
+        if growth is not None and growth not in names:
+            self._record(
+                f"growth_dimension {growth!r} does not name one of the problem's dimensions"
+            )
+            usable = False
+        return cast("tuple[Dimension, ...]", dimensions) if usable else None
 
     def _check_debug_generator(self, generators: list[AnyInputGenerator]) -> None:
         name = getattr(type(self._problem), "debug_generator", None)
@@ -280,12 +304,17 @@ class _Validator:
         return generators
 
     def _generated_samples(
-        self, generator: AnyInputGenerator
+        self, generator: AnyInputGenerator, dimensions: tuple[Dimension, ...]
     ) -> list[tuple[str, object]]:
         samples: list[tuple[str, object]] = []
         for offset in _SAMPLE_SIZE_OFFSETS:
-            size = self._minimum_size() + offset
-            subject = f"generator '{generator.name}' at size {size}"
+            size = Size(
+                **{
+                    dimension.name: dimension.minimum + offset
+                    for dimension in dimensions
+                }
+            )
+            subject = f"generator '{generator.name}' at {size}"
 
             generate = partial(self._generate_sample, generator, size)
             succeeded, first = self._attempt(f"{subject} raised", generate)
@@ -297,8 +326,8 @@ class _Validator:
             samples.append((subject, first))
         return samples
 
-    def _generate_sample(self, generator: AnyInputGenerator, size: int) -> object:
-        return generator.generate(random.Random(self._seed), size)  # noqa: S311  seeded generator for reproducible inputs, not cryptography
+    def _generate_sample(self, generator: AnyInputGenerator, size: Size) -> object:
+        return generator.generate(random.Random(self._seed), **size)  # noqa: S311  seeded generator for reproducible inputs, not cryptography
 
     def _check_expected_output(self, subject: str, input_data: object) -> None:
         problem = self._problem

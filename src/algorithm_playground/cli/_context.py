@@ -35,6 +35,7 @@ from algorithm_playground.core._configuration import (
     check_configured_problems,
     load_configured_problems,
 )
+from algorithm_playground.core._dimensions import Size, parse_size
 from algorithm_playground.core._hooks import HookError
 from algorithm_playground.core._hooks import call_hook as call_guarded
 from algorithm_playground.core._implementation import Implementation
@@ -64,6 +65,24 @@ USAGE_ERROR_EXIT_CODE = 2
 FAILURE_EXIT_CODE = 1
 
 HookResult = TypeVar("HookResult")
+
+
+def _remove_digit_separators(text: str) -> str:
+    """Remove the underscores from the values of a size, leaving the dimension names alone.
+
+    Args:
+        text: The text of a size.
+
+    Returns:
+        The text without underscores in the values.
+    """
+    parts = []
+    for part in text.split(":"):
+        label, separator, digits = part.partition("=")
+        parts.append(
+            f"{label}={digits.replace('_', '')}" if separator else part.replace("_", "")
+        )
+    return ":".join(parts)
 
 
 def _nearest_existing_ancestor(path: Path) -> Path:
@@ -201,6 +220,24 @@ class CommandContext:
         try:
             return get_problem(problem_name)
         except UnknownProblemError as error:
+            self.fail(str(error))
+
+    def parse_size(self, problem: AnyProblem, text: str) -> Size:
+        """Parse the text of a size, or exit with a usage error if it does not fit the problem.
+
+        Underscores between the digits of a value are accepted (``1_000``).
+
+        Args:
+            problem: The problem whose dimensions the size names.
+            text: The text of the size: a plain number for a problem with one
+                dimension, else ``name=N`` parts separated by colons.
+
+        Returns:
+            The size.
+        """
+        try:
+            return parse_size(_remove_digit_separators(text), problem.dimensions)
+        except CaseError as error:
             self.fail(str(error))
 
     def resolve_case(self, problem: AnyProblem, identifier: str) -> AnyCase:

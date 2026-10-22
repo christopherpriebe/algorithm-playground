@@ -24,15 +24,16 @@ class Frame:
         body: The picture as text, which may contain terminal color codes.
         caption: A short description of the step, for example the operation
             that led to it. It may span several lines.
-        highlighted_indices: The positions the body draws emphasized, so that
-            a test or another tool need not parse the body to know what the
-            frame points at.
+        highlighted_elements: The elements the body draws emphasized, in the
+            problem's own terms (positions, vertices, edges), so that a test or
+            another tool need not parse the body to know what the frame points
+            at.
     """
 
     body: str
     _: KW_ONLY
     caption: str = ""
-    highlighted_indices: tuple[int, ...] = ()
+    highlighted_elements: tuple[object, ...] = ()
 
 
 class FrameSequence(Sequence[Frame]):

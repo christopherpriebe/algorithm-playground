@@ -11,6 +11,7 @@ from algorithm_playground.core import (
     BenchmarkSettings,
     ImplementationBenchmark,
     Problem,
+    Size,
     SizeMeasurement,
     run_benchmark,
     summarize,
@@ -22,13 +23,15 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.sizes import build_sizes
+from helpers.two_dimensions import TwoDimensionProblem, add_pair
 
 
 def build_settings(**overrides: object) -> BenchmarkSettings:
     """Build benchmark settings of two small sizes, with the given fields replaced."""
     values: dict[str, Any] = {
         "seed": 1,
-        "sizes": (5, 10),
+        "sizes": build_sizes(5, 10),
         "repetitions": 1,
         "warmup": 0,
         "timeout_seconds": 30.0,
@@ -64,7 +67,7 @@ def compute_quadratic_seconds(values: list[int]) -> float:
     return 0.01 + 1e-7 * len(values) ** 2
 
 
-SIZES = (100, 200, 400, 800)
+SIZES = build_sizes(100, 200, 400, 800)
 
 
 def test_it_follows_the_work_when_the_startup_is_subtracted() -> None:
@@ -130,9 +133,9 @@ def test_the_startup_median_is_subtracted_not_the_mean() -> None:
         SizeMeasurement(
             distribution="uniform",
             size=size,
-            case_identifier=f"generated:uniform:size={size}:seed=0",
-            raw_samples=(0.01 + 1e-5 * size,) * 3,
-            summary=summarize([0.01 + 1e-5 * size] * 3),
+            case_identifier=f"generated:uniform:{size}:seed=0",
+            raw_samples=(0.01 + 1e-5 * size["size"],) * 3,
+            summary=summarize([0.01 + 1e-5 * size["size"]] * 3),
         )
         for size in SIZES
     )
@@ -156,7 +159,7 @@ def test_there_is_none_with_fewer_than_three_sizes() -> None:
     report, _, _ = run_fake_benchmark(
         {"a": sort_correctly},
         durations={"a": compute_quadratic_seconds},
-        sizes=(100, 200),
+        sizes=build_sizes(100, 200),
     )
 
     growth = report.implementations[0].growth("uniform")
@@ -178,7 +181,7 @@ def test_work_well_above_the_startup_is_reliable() -> None:
     report, _, _ = run_fake_benchmark(
         {"a": sort_correctly},
         durations={"a": compute_quadratic_seconds},
-        sizes=(1000, 2000, 4000, 8000),
+        sizes=build_sizes(1000, 2000, 4000, 8000),
         repetitions=3,
     )
 
@@ -216,3 +219,23 @@ def test_without_a_startup_measurement_there_is_nothing_to_doubt() -> None:
     report, _, _ = run_fake_benchmark({"a": crash})
 
     assert report.implementations[0].is_growth_reliable("uniform")
+
+
+def test_it_is_fitted_against_the_growth_dimension_of_the_problem() -> None:
+    """Test the growth follows the dimension the problem names, not its first one."""
+    sizes = tuple(Size(vertices=2, edges=edges) for edges in (10, 20, 40, 80))
+    runners = FakeRunners(
+        {"adder": add_pair}, durations={"adder": lambda pair: 0.01 + 1e-3 * pair[1]}
+    )
+
+    report = run_benchmark(
+        TwoDimensionProblem(),
+        build_named_implementations("adder"),
+        build_settings(sizes=sizes, subtract_startup_time=True),
+        runner_factory=runners,
+    )
+
+    growth = report.implementations[0].growth("exact")
+    assert growth is not None
+    assert growth.exponent == pytest.approx(1.0)
+    assert growth.growth_class == "n"

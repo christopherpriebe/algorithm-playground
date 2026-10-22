@@ -36,6 +36,16 @@ Problem ABC
 .. autofunction:: algorithm_playground.core.has_trace_format
 .. autofunction:: algorithm_playground.core.has_input_reader
 
+Dimensions and sizes
+--------------------
+
+.. autoclass:: algorithm_playground.core.Dimension
+.. autoclass:: algorithm_playground.core.Size
+.. autofunction:: algorithm_playground.core.parse_size
+.. autofunction:: algorithm_playground.core.build_minimum_size
+.. autofunction:: algorithm_playground.core.build_default_maximum_size
+.. autofunction:: algorithm_playground.core.get_growth_dimension
+
 Cases
 -----
 

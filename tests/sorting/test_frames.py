@@ -82,7 +82,7 @@ def test_positions_that_changed_since_the_previous_snapshot_are_highlighted() ->
     """Test the positions that changed since the previous snapshot are highlighted."""
     frames = draw_sorting_trace_frames((), SNAPSHOT_TRACE)
 
-    assert [frame.highlighted_indices for frame in frames] == [
+    assert [frame.highlighted_elements for frame in frames] == [
         (),
         (0, 1),
         (),
@@ -107,7 +107,7 @@ def test_snapshots_of_different_lengths_are_not_compared() -> None:
     """Test snapshots of different lengths highlight nothing."""
     frames = draw_sorting_trace_frames((), SortingTrace(((1, 2), (1,))))
 
-    assert frames[1].highlighted_indices == ()
+    assert frames[1].highlighted_elements == ()
 
 
 def test_a_long_list_of_changes_is_cut_short() -> None:
@@ -180,14 +180,14 @@ def test_the_start_frame_announces_the_events_and_highlights_nothing() -> None:
     frames = build_event_frames(RECORDED_EVENTS, (2, 1, 3))
 
     assert frames[0].caption.startswith("start: 4 events follow")
-    assert frames[0].highlighted_indices == ()
+    assert frames[0].highlighted_elements == ()
 
 
 def test_each_frame_highlights_the_indices_of_its_event() -> None:
     """Test each event frame highlights the indices its event names."""
     frames = build_event_frames(RECORDED_EVENTS, (2, 1, 3))
 
-    assert [frame.highlighted_indices for frame in frames] == [
+    assert [frame.highlighted_elements for frame in frames] == [
         (),
         (0, 1),
         (0, 1),

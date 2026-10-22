@@ -14,6 +14,7 @@ from algorithm_playground.core import (
     CaseStatus,
     TestReport,
     TestRunOptions,
+    VerificationResult,
     describe_error,
     describe_sequence,
     resolve_case,
@@ -80,14 +81,28 @@ class RecordingDescriptionsProblem(SortingProblem):
     """Sorting that records the focus each describe_output call received."""
 
     def __init__(self) -> None:
-        self.focuses: list[int | None] = []
+        self.focuses: list[object] = []
 
     @override
     def describe_output(
-        self, output: list[int], *, limit: int, focus: int | None = None
+        self, output: list[int], *, limit: int, focus: object | None = None
     ) -> str:
         self.focuses.append(focus)
         return super().describe_output(output, limit=limit, focus=focus)
+
+
+EDGE_FOCUS = ("vertex 2", "vertex 5")
+
+
+class EdgeFocusProblem(RecordingDescriptionsProblem):
+    """Sorting whose verifier names a failure by something other than a position."""
+
+    @override
+    def verify(self, input_data: list[int], output: list[int]) -> VerificationResult:
+        verification = super().verify(input_data, output)
+        if verification.passed:
+            return verification
+        return VerificationResult(False, message=verification.message, focus=EDGE_FOCUS)
 
 
 def resolve_cases(*identifiers: str) -> list[Case[Any]]:
@@ -399,6 +414,25 @@ def test_a_failure_without_a_position_describes_the_outputs_without_one() -> Non
     )
 
     assert problem.focuses == [None]
+
+
+def test_a_focus_that_is_not_a_position_reaches_the_describe_hook_unchanged() -> None:
+    """Test the describe hook receives the verifier's focus as given, whatever its kind."""
+    problem = EdgeFocusProblem()
+
+    report = run_tests(
+        problem,
+        build_named_implementations("bad"),
+        resolve_cases(LARGE_GENERATED),
+        options=NO_SHRINKING,
+        runner_factory=FakeRunners({"bad": drop_last_above_five}),
+    )
+
+    detail = report.outcomes[0].detail
+    assert problem.focuses == [EDGE_FOCUS, EDGE_FOCUS]
+    assert detail is not None
+    assert detail.actual_text is not None
+    assert detail.actual_text.startswith("[")
 
 
 def test_the_window_around_the_difference_is_in_the_description() -> None:

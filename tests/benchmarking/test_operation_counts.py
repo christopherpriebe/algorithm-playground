@@ -15,6 +15,7 @@ from algorithm_playground.core import (
     OperationIssueKind,
     Problem,
     RunnerError,
+    Size,
     run_benchmark,
 )
 from algorithm_playground.problems.sorting import SortingProblem, SortingTrace
@@ -28,6 +29,7 @@ from helpers.fakes import (
     sort_correctly,
 )
 from helpers.misbehaving import FaultyProblem, count_distinct_values
+from helpers.sizes import build_sizes
 
 
 class ProblemWhoseOperationCountsRaise(SortingProblem):
@@ -45,7 +47,7 @@ def build_settings(**overrides: object) -> BenchmarkSettings:
     """Build benchmark settings of two small sizes, with the given fields replaced."""
     values: dict[str, Any] = {
         "seed": 1,
-        "sizes": (5, 10),
+        "sizes": build_sizes(5, 10),
         "repetitions": 1,
         "warmup": 0,
         "timeout_seconds": 30.0,
@@ -86,7 +88,9 @@ def run_counting_benchmark(
     behaviors = dict.fromkeys(traces, sort_correctly)
     runners = FakeRunners(behaviors, traces=traces)
     events: list[BenchmarkProgress] = []
-    settings = build_settings(count_operations=True, sizes=(8, 16, 32, 64), **overrides)
+    settings = build_settings(
+        count_operations=True, sizes=build_sizes(8, 16, 32, 64), **overrides
+    )
     report = run_benchmark(
         SortingProblem() if problem is None else problem,
         build_named_implementations(*behaviors),
@@ -103,7 +107,7 @@ def untraced_run() -> tuple[BenchmarkReport, FakeRunners, list[BenchmarkProgress
     return run_fake_benchmark(
         {"a": count_distinct_values},
         problem=FaultyProblem(),
-        sizes=(3, 6),
+        sizes=build_sizes(3, 6),
         count_operations=True,
     )
 
@@ -150,7 +154,7 @@ def test_measurements_have_neither_counts_nor_an_issue(
 def test_a_problem_with_a_trace_format_keeps_counting() -> None:
     """Test a problem with a trace format has its operations counted at every size."""
     report, runners, _ = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(3, 6), count_operations=True
+        {"a": sort_correctly}, sizes=build_sizes(3, 6), count_operations=True
     )
 
     assert report.settings.count_operations is True
@@ -208,7 +212,9 @@ def test_merge_sort_writes_values_and_never_swaps(
     insertion_and_merge_report: BenchmarkReport,
 ) -> None:
     """Test a merge sort is counted as writing values and swapping none."""
-    merge = insertion_and_merge_report.implementations[1].measurement_at("sorted", 8)
+    merge = insertion_and_merge_report.implementations[1].measurement_at(
+        "sorted", Size(size=8)
+    )
 
     assert merge is not None
     assert merge.operation_counts is not None
@@ -320,7 +326,7 @@ def test_counts_come_only_from_a_traced_run_whose_output_verifies() -> None:
     report = run_benchmark(
         SortingProblem(),
         build_named_implementations("a"),
-        build_settings(count_operations=True, sizes=(8, 16)),
+        build_settings(count_operations=True, sizes=build_sizes(8, 16)),
         runner_factory=runners,
     )
 
@@ -344,7 +350,9 @@ def test_counts_are_read_from_an_unverified_output_when_verification_is_off() ->
     report = run_benchmark(
         SortingProblem(),
         build_named_implementations("a"),
-        build_settings(count_operations=True, verify_outputs=False, sizes=(8,)),
+        build_settings(
+            count_operations=True, verify_outputs=False, sizes=build_sizes(8)
+        ),
         runner_factory=runners,
     )
 
@@ -369,21 +377,20 @@ def test_a_failed_traced_run_fails_the_implementation_but_keeps_its_timings() ->
 
     assert failed.failure is not None
     assert (
-        "Run failed for size 32 (uniform) while counting operations" in failed.failure
+        "Run failed for size=32 (uniform) while counting operations" in failed.failure
     )
-    assert [measurement.size for measurement in failed.measurements] == [8, 16, 32]
+    assert [measurement.size for measurement in failed.measurements] == list(
+        build_sizes(8, 16, 32)
+    )
     assert failed.measurements[-1].operation_counts is None
     issue = failed.measurements[-1].operation_issue
     assert issue is not None
     assert issue.kind is OperationIssueKind.COUNTING_FAILED
-    assert failed.status_at("uniform", 32) is CellStatus.MEASURED
-    assert failed.status_at("uniform", 64) is CellStatus.SKIPPED
-    assert [measurement.size for measurement in healthy.measurements] == [
-        8,
-        16,
-        32,
-        64,
-    ]
+    assert failed.status_at("uniform", Size(size=32)) is CellStatus.MEASURED
+    assert failed.status_at("uniform", Size(size=64)) is CellStatus.SKIPPED
+    assert [measurement.size for measurement in healthy.measurements] == list(
+        build_sizes(8, 16, 32, 64)
+    )
 
 
 def test_an_exception_while_counting_is_recorded_as_a_failure() -> None:
@@ -413,7 +420,7 @@ def test_progress_events_announce_each_counting_run() -> None:
         (event.size, event.completed, event.distribution) for event in counting
     ] == [
         (size, completed, "sorted")
-        for size in (8, 16, 32, 64)
+        for size in build_sizes(8, 16, 32, 64)
         for completed in (False, True)
     ]
 

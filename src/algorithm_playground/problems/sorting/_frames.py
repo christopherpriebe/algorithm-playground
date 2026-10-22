@@ -150,7 +150,7 @@ def _event_frames(start: tuple[int, ...], events: EventLog) -> FrameSequence:
             body,
             caption=f"event {position} / {event_count}: {event.describe()}\n"
             f"values now: {_describe_values(values, indices)}\n{totals}",
-            highlighted_indices=indices,
+            highlighted_elements=indices,
         )
 
     return FrameSequence(event_count + 1, _build_frame)
@@ -183,7 +183,7 @@ def _snapshot_frames(trace: SortingTrace) -> FrameSequence:
         return Frame(
             body,
             caption=_describe_snapshot(position, values, changed),
-            highlighted_indices=changed,
+            highlighted_elements=changed,
         )
 
     return FrameSequence(len(snapshots), _build_frame)

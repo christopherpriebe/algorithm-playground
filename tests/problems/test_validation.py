@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from algorithm_playground.core import (
+    Dimension,
     Fixture,
     InputGenerator,
     Problem,
@@ -16,6 +17,7 @@ from algorithm_playground.core import (
     validate_problem,
 )
 from algorithm_playground.problems.sorting import SortingProblem
+from helpers.two_dimensions import Pair, TwoDimensionProblem
 
 
 def generate_values(random_generator: random.Random, size: int) -> list[int]:
@@ -176,7 +178,7 @@ def test_a_generator_must_be_deterministic_for_a_fixed_seed() -> None:
     findings = validate_problem(problem)
 
     assert (
-        "generator 'unseeded' at size 5 returned different inputs for the same seed"
+        "generator 'unseeded' at size=5 returned different inputs for the same seed"
         in (findings)
     )
 
@@ -196,7 +198,7 @@ def test_a_generator_must_accept_size_zero() -> None:
     findings = validate_problem(build_sorting_variant(generators=provide_generator))
 
     assert (
-        "generator 'g' at size 0 raised: ValueError: size zero is not supported"
+        "generator 'g' at size=0 raised: ValueError: size zero is not supported"
         in findings
     )
 
@@ -319,7 +321,9 @@ def test_generators_are_sampled_from_the_minimum_size_up() -> None:
         return (InputGenerator("g", description="g", generate=generate_from_four),)
 
     problem = build_sorting_variant(
-        minimum_size=4, debug_generator=None, generators=provide_generator
+        dimensions=(Dimension("size", minimum=4),),
+        debug_generator=None,
+        generators=provide_generator,
     )
 
     findings = validate_problem(problem)
@@ -342,18 +346,72 @@ def test_a_generator_that_fails_below_the_minimum_size_is_reported_there() -> No
 
     findings = validate_problem(build_sorting_variant(generators=provide_generator))
 
-    assert "generator 'g' at size 0 raised: ValueError: needs four values" in findings
+    assert "generator 'g' at size=0 raised: ValueError: needs four values" in findings
 
 
 @pytest.mark.parametrize(
-    "value", [-1, "3", 1.5, True], ids=["negative", "text", "float", "boolean"]
+    "value",
+    [(), [Dimension("size")], ("size",)],
+    ids=["empty", "list", "not-dimensions"],
 )
-def test_the_minimum_size_must_be_a_non_negative_integer(value: object) -> None:
-    """Test a minimum size that is not a non-negative integer is a finding."""
-    findings = validate_problem(build_sorting_variant(minimum_size=value))
+def test_the_dimensions_must_be_a_non_empty_tuple_of_dimensions(value: object) -> None:
+    """Test dimensions that are not a non-empty tuple of Dimension objects are a finding."""
+    findings = validate_problem(build_sorting_variant(dimensions=value))
 
     assert any(
-        finding.startswith("the class attribute 'minimum_size' must be an integer")
+        finding.startswith(
+            "the class attribute 'dimensions' must be a non-empty tuple of Dimension"
+        )
+        for finding in findings
+    )
+
+
+def test_dimension_names_must_be_unique() -> None:
+    """Test a dimension name used twice is a finding."""
+    problem = build_sorting_variant(dimensions=(Dimension("size"), Dimension("size")))
+
+    findings = validate_problem(problem)
+
+    assert "the dimension name 'size' is used more than once" in findings
+
+
+def test_the_growth_dimension_may_name_a_dimension() -> None:
+    """Test a growth dimension that names one of the dimensions has no findings."""
+    assert validate_problem(build_sorting_variant(growth_dimension="size")) == []
+
+
+def test_the_growth_dimension_must_name_a_dimension() -> None:
+    """Test a growth dimension that names no dimension is a finding."""
+    findings = validate_problem(build_sorting_variant(growth_dimension="nope"))
+
+    assert (
+        "growth_dimension 'nope' does not name one of the problem's dimensions"
+        in findings
+    )
+
+
+def test_a_problem_with_several_dimensions_is_valid() -> None:
+    """Test a problem with two dimensions passes validation."""
+    assert validate_problem(TwoDimensionProblem()) == []
+
+
+def test_a_generator_that_does_not_accept_the_dimensions_is_reported() -> None:
+    """Test a generator that takes a size where the problem has other dimensions is a finding."""
+
+    def generate_from_a_size(_random_generator: random.Random, size: int) -> Pair:
+        return (size, size)
+
+    def provide_generator(_: TwoDimensionProblem) -> tuple[InputGenerator[Pair]]:
+        return (InputGenerator("g", description="g", generate=generate_from_a_size),)
+
+    problem = type(
+        "Variant", (TwoDimensionProblem,), {"generators": provide_generator}
+    )()
+
+    findings = validate_problem(problem)
+
+    assert any(
+        finding.startswith("generator 'g' at vertices=1:edges=0 raised: TypeError")
         for finding in findings
     )
 
@@ -484,7 +542,7 @@ def test_a_generated_sample_that_breaks_the_rule_is_named() -> None:
     findings = validate_problem(build_sorting_variant(check_input=reject_empty_input))
 
     assert (
-        "check_input() rejects generator 'uniform' at size 0: must not be empty"
+        "check_input() rejects generator 'uniform' at size=0: must not be empty"
         in findings
     )
     assert "check_input() rejects fixture 'empty': must not be empty" in findings

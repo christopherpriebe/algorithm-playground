@@ -13,9 +13,11 @@ from algorithm_playground.core import (
     BenchmarkSettings,
     CaseError,
     CellStatus,
+    Dimension,
     FailureStage,
     Problem,
     RunnerError,
+    Size,
     generate_case,
     include_failed_implementations,
     run_benchmark,
@@ -27,19 +29,20 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.sizes import build_sizes
 
 
 class NeedsTwoValuesProblem(SortingProblem):
     """Sorting whose generators cannot produce fewer than two values."""
 
-    minimum_size = 2
+    dimensions = (Dimension("size", minimum=2),)
 
 
 def build_settings(**overrides: object) -> BenchmarkSettings:
     """Build benchmark settings of two small sizes, with the given fields replaced."""
     values: dict[str, Any] = {
         "seed": 1,
-        "sizes": (5, 10),
+        "sizes": build_sizes(5, 10),
         "repetitions": 1,
         "warmup": 0,
         "timeout_seconds": 30.0,
@@ -80,7 +83,7 @@ def run_picky_benchmark() -> tuple[BenchmarkReport, FakeRunners]:
 
     report, runners, _ = run_fake_benchmark(
         {"picky": fail_on_sorted_input, "steady": sort_correctly},
-        sizes=(5, 10),
+        sizes=build_sizes(5, 10),
         distributions=("uniform", "sorted", "reversed"),
     )
     return report, runners
@@ -88,7 +91,7 @@ def run_picky_benchmark() -> tuple[BenchmarkReport, FakeRunners]:
 
 def test_the_default_generator_alone_is_measured_when_none_is_named() -> None:
     """Test the settings and the measurements name the uniform distribution by default."""
-    report, _, _ = run_fake_benchmark({"a": sort_correctly}, sizes=(3,))
+    report, _, _ = run_fake_benchmark({"a": sort_correctly}, sizes=build_sizes(3))
 
     assert report.settings.distributions == ("uniform",)
     assert [
@@ -101,7 +104,7 @@ def test_every_named_distribution_is_measured_at_every_size_in_order() -> None:
     """Test each named distribution is measured at every size, one distribution after another."""
     report, _, _ = run_fake_benchmark(
         {"a": sort_correctly},
-        sizes=(4, 9),
+        sizes=build_sizes(4, 9),
         seed=3,
         distributions=("sorted", "few_unique"),
     )
@@ -112,10 +115,10 @@ def test_every_named_distribution_is_measured_at_every_size_in_order() -> None:
     assert [
         (measurement.distribution, measurement.size) for measurement in measurements
     ] == [
-        ("sorted", 4),
-        ("sorted", 9),
-        ("few_unique", 4),
-        ("few_unique", 9),
+        ("sorted", Size(size=4)),
+        ("sorted", Size(size=9)),
+        ("few_unique", Size(size=4)),
+        ("few_unique", Size(size=9)),
     ]
 
 
@@ -123,7 +126,7 @@ def test_each_measurement_names_the_generated_case_of_its_distribution() -> None
     """Test the case identifier of a measurement names its distribution, size and seed."""
     report, _, _ = run_fake_benchmark(
         {"a": sort_correctly},
-        sizes=(4, 9),
+        sizes=build_sizes(4, 9),
         seed=3,
         distributions=("sorted", "few_unique"),
     )
@@ -142,12 +145,14 @@ def test_the_runner_receives_the_input_of_the_named_distribution() -> None:
     """Test the sorted distribution sends an already sorted input to the runner."""
     _, runners, _ = run_fake_benchmark(
         {"a": sort_correctly},
-        sizes=(4, 9),
+        sizes=build_sizes(4, 9),
         seed=3,
         distributions=("sorted", "few_unique"),
     )
     by_name = {generator.name: generator for generator in SortingProblem().generators()}
-    sorted_input = generate_case(by_name["sorted"], size=9, seed=3).input_data
+    sorted_input = generate_case(
+        by_name["sorted"], size=Size(size=9), seed=3
+    ).input_data
 
     assert sorted_input == sorted(sorted_input)
     assert sorted_input in runners.collect_inputs_of("a")
@@ -156,36 +161,42 @@ def test_the_runner_receives_the_input_of_the_named_distribution() -> None:
 def test_a_measurement_is_found_by_distribution_and_size() -> None:
     """Test a measurement is looked up by its distribution and size."""
     report, _, _ = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(4, 9), distributions=("sorted", "reversed")
+        {"a": sort_correctly},
+        sizes=build_sizes(4, 9),
+        distributions=("sorted", "reversed"),
     )
 
-    found = report.implementations[0].measurement_at("reversed", 9)
+    found = report.implementations[0].measurement_at("reversed", Size(size=9))
 
     assert found is not None
-    assert (found.distribution, found.size) == ("reversed", 9)
+    assert (found.distribution, found.size) == ("reversed", Size(size=9))
 
 
 def test_a_measurement_that_does_not_exist_is_not_found() -> None:
     """Test looking up an unmeasured size or distribution finds nothing."""
     report, _, _ = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(4, 9), distributions=("sorted", "reversed")
+        {"a": sort_correctly},
+        sizes=build_sizes(4, 9),
+        distributions=("sorted", "reversed"),
     )
     item = report.implementations[0]
 
-    assert item.measurement_at("reversed", 5) is None
-    assert item.measurement_at("uniform", 9) is None
+    assert item.measurement_at("reversed", Size(size=5)) is None
+    assert item.measurement_at("uniform", Size(size=9)) is None
 
 
 def test_the_measurements_of_one_distribution_are_selected_by_name() -> None:
     """Test the measurements of a distribution are selected in size order."""
     report, _, _ = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(4, 9), distributions=("sorted", "reversed")
+        {"a": sort_correctly},
+        sizes=build_sizes(4, 9),
+        distributions=("sorted", "reversed"),
     )
     item = report.implementations[0]
 
     assert [measurement.size for measurement in item.measurements_for("sorted")] == [
-        4,
-        9,
+        Size(size=4),
+        Size(size=9),
     ]
     assert item.measurements_for("uniform") == ()
 
@@ -196,7 +207,7 @@ def test_the_startup_is_measured_once_per_implementation_whatever_the_distributi
     """Test the startup runs once per repetition however many distributions are measured."""
     report, runners, events = run_fake_benchmark(
         {"a": sort_correctly},
-        sizes=(4,),
+        sizes=build_sizes(4),
         repetitions=2,
         distributions=("sorted", "reversed", "all_equal"),
     )
@@ -223,7 +234,7 @@ def test_the_startup_input_has_the_minimum_size_of_the_problem() -> None:
     run_benchmark(
         NeedsTwoValuesProblem(),
         build_named_implementations("a"),
-        build_settings(sizes=(4,), distributions=("reversed",)),
+        build_settings(sizes=build_sizes(4), distributions=("reversed",)),
         runner_factory=runners,
     )
 
@@ -234,11 +245,13 @@ def test_the_startup_input_has_the_minimum_size_of_the_problem() -> None:
 
 def test_a_size_below_the_minimum_size_of_the_problem_is_an_error() -> None:
     """Test a size below the minimum size of the problem raises a CaseError."""
-    with pytest.raises(CaseError, match="at least 2 elements, but the sizes include 1"):
+    with pytest.raises(
+        CaseError, match=r"'size' of at least 2, but the sizes include size=1"
+    ):
         run_benchmark(
             NeedsTwoValuesProblem(),
             build_named_implementations("a"),
-            build_settings(sizes=(1, 4)),
+            build_settings(sizes=build_sizes(1, 4)),
             runner_factory=FakeRunners({"a": sort_correctly}),
         )
 
@@ -246,7 +259,9 @@ def test_a_size_below_the_minimum_size_of_the_problem_is_an_error() -> None:
 def test_progress_events_name_the_distribution_of_each_sized_run() -> None:
     """Test each completed sized run reports its distribution and size."""
     _, _, events = run_fake_benchmark(
-        {"a": sort_correctly}, sizes=(4,), distributions=("sorted", "reversed")
+        {"a": sort_correctly},
+        sizes=build_sizes(4),
+        distributions=("sorted", "reversed"),
     )
 
     sized = [
@@ -255,7 +270,7 @@ def test_progress_events_name_the_distribution_of_each_sized_run() -> None:
         if event.size is not None and event.completed
     ]
 
-    assert sized == [("sorted", 4), ("reversed", 4)]
+    assert sized == [("sorted", Size(size=4)), ("reversed", Size(size=4))]
 
 
 def test_identical_inputs_reach_every_implementation_in_every_distribution() -> None:
@@ -275,9 +290,9 @@ def test_a_failure_names_its_distribution_and_size() -> None:
     picky = report.implementations[0]
 
     assert picky.failure is not None
-    assert "size 5 (sorted)" in picky.failure
+    assert "size=5 (sorted)" in picky.failure
     assert [(item.stage, item.distribution, item.size) for item in picky.failures] == [
-        (FailureStage.MEASUREMENT, "sorted", 5)
+        (FailureStage.MEASUREMENT, "sorted", Size(size=5))
     ]
 
 
@@ -291,10 +306,10 @@ def test_a_failure_skips_only_the_rest_of_its_distribution() -> None:
         (measurement.distribution, measurement.size)
         for measurement in picky.measurements
     ] == [
-        ("uniform", 5),
-        ("uniform", 10),
-        ("reversed", 5),
-        ("reversed", 10),
+        ("uniform", Size(size=5)),
+        ("uniform", Size(size=10)),
+        ("reversed", Size(size=5)),
+        ("reversed", Size(size=10)),
     ]
     # startup, uniform x2, the failed sorted run, reversed x2: nothing ran for sorted size 10
     assert len(runners.collect_inputs_of("picky")) == 1 + 2 + 1 + 2
@@ -326,7 +341,7 @@ def test_cells_after_a_failure_are_skipped_and_the_failed_cell_is_failed() -> No
     assert [
         picky.status_at(distribution, size)
         for distribution in ("uniform", "sorted", "reversed")
-        for size in (5, 10)
+        for size in build_sizes(5, 10)
     ] == [
         CellStatus.MEASURED,
         CellStatus.MEASURED,
@@ -348,7 +363,7 @@ def test_a_startup_failure_fails_the_startup_cell_and_skips_every_size() -> None
 
     assert crashing.failures[0].stage is FailureStage.STARTUP
     assert crashing.startup_status() is CellStatus.FAILED
-    assert crashing.status_at("sorted", 5) is CellStatus.SKIPPED
+    assert crashing.status_at("sorted", Size(size=5)) is CellStatus.SKIPPED
     assert len(runners.collect_inputs_of("crashing")) == 1
 
 
@@ -377,7 +392,7 @@ def test_an_implementation_that_failed_before_running_fails_every_cell(
     unrun = completed_report.implementations[1]
 
     assert unrun.startup_status() is CellStatus.FAILED
-    assert unrun.status_at("uniform", 5) is CellStatus.FAILED
+    assert unrun.status_at("uniform", Size(size=5)) is CellStatus.FAILED
 
 
 def test_an_implementation_that_failed_before_running_fails_the_report(
@@ -433,7 +448,9 @@ def test_a_run_that_cannot_write_the_input_fails_that_implementation_and_distrib
         return sorted(values)
 
     report, _, _ = run_fake_benchmark(
-        {"a": cannot_serialize}, sizes=(5,), distributions=("sorted", "reversed")
+        {"a": cannot_serialize},
+        sizes=build_sizes(5),
+        distributions=("sorted", "reversed"),
     )
 
     item = report.implementations[0]

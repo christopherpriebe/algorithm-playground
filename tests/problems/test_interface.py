@@ -9,15 +9,18 @@ from hypothesis import given, strategies
 from typing_extensions import override
 
 from algorithm_playground.core import (
+    Dimension,
     Fixture,
     GeneratedOrigin,
     HookError,
     InputGenerator,
     Problem,
+    Size,
     VerificationResult,
     assert_valid_problem,
     build_startup_case,
     call_hook,
+    get_growth_dimension,
     has_input_reader,
     has_trace_format,
     parse_case_identifier,
@@ -129,13 +132,16 @@ def test_a_problem_that_reads_its_inputs_has_an_input_reader() -> None:
     assert has_input_reader(ReadingProblem())
 
 
+@pytest.mark.parametrize(
+    "focus", [0, ("vertex", 7), "node 3"], ids=["position", "pair", "text"]
+)
 def test_the_output_is_described_the_same_with_or_without_a_focus(
-    problem: MinimalProblem,
+    problem: MinimalProblem, focus: object
 ) -> None:
-    """Test a focus on an output does not change its default description."""
-    assert problem.describe_output(7, limit=100, focus=0) == problem.describe_output(
-        7, limit=100
-    )
+    """Test a focus of any kind on an output does not change its default description."""
+    assert problem.describe_output(
+        7, limit=100, focus=focus
+    ) == problem.describe_output(7, limit=100)
 
 
 def test_a_verification_names_no_position_and_no_category_by_default() -> None:
@@ -152,6 +158,15 @@ def test_a_verification_can_name_a_position_and_a_category() -> None:
     assert (result.focus, result.category) == (3, "short")
 
 
+def test_a_verification_focus_is_whatever_the_problem_uses() -> None:
+    """Test a focus need not be a position: an edge, a vertex or a cell is kept as given."""
+    edge = ("vertex 2", "vertex 5")
+
+    result = VerificationResult(False, message="missing edge", focus=edge)
+
+    assert result.focus == edge
+
+
 def test_a_failed_verification_needs_a_message() -> None:
     """Test a failure without a message is rejected, since reports would say nothing."""
     with pytest.raises(ValueError, match="failed verification needs a message"):
@@ -162,7 +177,7 @@ def test_a_failed_verification_needs_a_message() -> None:
     ("focus", "category"), [(1, ""), (None, "short")], ids=["focus", "category"]
 )
 def test_a_passed_verification_has_no_focus_or_category(
-    focus: int | None, category: str
+    focus: object | None, category: str
 ) -> None:
     """Test a focus or a category, which only describe a failure, is rejected on a pass."""
     with pytest.raises(
@@ -229,7 +244,7 @@ def test_every_accepted_generator_name_round_trips_through_a_case_identifier(
 ) -> None:
     """Test a name the generator accepts can always be read back from its case identifier."""
     InputGenerator(name, description="any", generate=generate_small_numbers)
-    origin = GeneratedOrigin(generator_name=name, seed=seed, size=size)
+    origin = GeneratedOrigin(generator_name=name, seed=seed, size=Size(size=size))
 
     assert parse_case_identifier(origin.identifier) == origin
 
@@ -244,9 +259,15 @@ def test_the_problem_has_no_trace_format(
     assert problem.deserialize_trace(trace, [1]) is None
 
 
-def test_the_smallest_size_is_zero(problem: MinimalProblem) -> None:
-    """Test inputs may be empty by default."""
-    assert problem.minimum_size == 0
+def test_there_is_one_dimension_called_size(problem: MinimalProblem) -> None:
+    """Test a problem has one dimension by default, called size and starting at zero."""
+    assert problem.dimensions == (Dimension("size"),)
+
+
+def test_the_growth_dimension_is_the_first_by_default(problem: MinimalProblem) -> None:
+    """Test a problem names no growth dimension by default, so its first one is used."""
+    assert problem.growth_dimension is None
+    assert get_growth_dimension(problem).name == "size"
 
 
 def test_nothing_is_preferred_for_debugging(problem: MinimalProblem) -> None:

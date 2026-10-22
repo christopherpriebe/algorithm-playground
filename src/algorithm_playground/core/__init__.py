@@ -90,6 +90,14 @@ from algorithm_playground.core._description import (
     describe_sequence,
     truncate_text,
 )
+from algorithm_playground.core._dimensions import (
+    Dimension,
+    Size,
+    build_default_maximum_size,
+    build_minimum_size,
+    get_growth_dimension,
+    parse_size,
+)
 from algorithm_playground.core._errors import AlgorithmPlaygroundError
 from algorithm_playground.core._frames import (
     Frame,
@@ -233,6 +241,7 @@ __all__ = [
     "Configuration",
     "ConfigurationError",
     "ConfiguredImplementation",
+    "Dimension",
     "FailureDetail",
     "FailureStage",
     "Fixture",
@@ -264,6 +273,7 @@ __all__ = [
     "ShrunkFailure",
     "ShrunkOrigin",
     "SingleRun",
+    "Size",
     "SizeMeasurement",
     "StateTimeline",
     "TemporaryFilePolicy",
@@ -275,8 +285,10 @@ __all__ = [
     "VerificationResult",
     "assert_valid_problem",
     "build_cases",
+    "build_default_maximum_size",
     "build_implementation",
     "build_implementations",
+    "build_minimum_size",
     "build_startup_case",
     "build_subprocess_runner_factory",
     "call_hook",
@@ -300,6 +312,7 @@ __all__ = [
     "format_duration",
     "generate_case",
     "get_default_generator",
+    "get_growth_dimension",
     "get_problem",
     "has_input_reader",
     "has_trace_format",
@@ -313,6 +326,7 @@ __all__ = [
     "load_problem_modules",
     "make_safe_file_name",
     "parse_case_identifier",
+    "parse_size",
     "read_f64",
     "read_f64_array",
     "read_i32",

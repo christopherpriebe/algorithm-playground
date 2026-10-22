@@ -36,7 +36,10 @@ from algorithm_playground.cli._options import (
     build_timeout_option,
     choose_environment_policy,
 )
-from algorithm_playground.cli._rendering import create_progress_display_with_bar
+from algorithm_playground.cli._rendering import (
+    create_progress_display_with_bar,
+    format_size,
+)
 from algorithm_playground.core._benchmarking import (
     BenchmarkFailure,
     BenchmarkPhase,
@@ -48,6 +51,7 @@ from algorithm_playground.core._benchmarking import (
     include_failed_implementations,
 )
 from algorithm_playground.core._cases import CaseError, check_sizes, select_generators
+from algorithm_playground.core._dimensions import Size
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem, has_trace_format
 from algorithm_playground.core._report import convert_benchmark_report_to_json
@@ -56,32 +60,26 @@ from algorithm_playground.core._runner import DEFAULT_TIMEOUT_SECONDS
 __all__ = ["benchmark_command"]
 
 
-def _parse_sizes(raw: str) -> tuple[int, ...]:
+def _parse_sizes(
+    context: CommandContext, problem: AnyProblem, raw: str
+) -> tuple[Size, ...]:
     parts = [part.strip() for part in raw.split(",") if part.strip()]
     if not parts:
         message = "At least one size must be provided."
         raise typer.BadParameter(message)
-    sizes: list[int] = []
-    for part in parts:
-        try:
-            value = int(part.replace("_", ""))
-        except ValueError as error:
-            message = f"Could not parse size: {part!r}"
-            raise typer.BadParameter(message) from error
-        if value < 0:
-            message = f"Sizes must be non-negative, got {value}"
-            raise typer.BadParameter(message)
-        sizes.append(value)
-    repeated = sorted({size for size in sizes if sizes.count(size) > 1})
+    sizes = [context.parse_size(problem, part) for part in parts]
+    texts = [str(size) for size in sizes]
+    repeated = [text for text in dict.fromkeys(texts) if texts.count(text) > 1]
     if repeated:
-        listing = ", ".join(str(size) for size in repeated)
-        message = f"Sizes must be unique, but these were repeated: {listing}"
+        message = (
+            f"Sizes must be unique, but these were repeated: {', '.join(repeated)}"
+        )
         raise typer.BadParameter(message)
     return tuple(sizes)
 
 
 def _check_problem_sizes(
-    context: CommandContext, problem: AnyProblem, sizes: Sequence[int]
+    context: CommandContext, problem: AnyProblem, sizes: Sequence[Size]
 ) -> None:
     try:
         check_sizes(problem, sizes)
@@ -117,10 +115,11 @@ def _check_reference(
 
 
 def _describe_progress(event: BenchmarkProgress) -> str:
-    if event.phase is BenchmarkPhase.STARTUP:
+    if event.phase is BenchmarkPhase.STARTUP or event.size is None:
         where = "startup"
     else:
-        where = f"{event.distribution}, size {event.size:,}"
+        label = "size " if len(event.size) == 1 else ""
+        where = f"{event.distribution}, {label}{format_size(event.size)}"
         if event.phase is BenchmarkPhase.OPERATION_COUNT:
             where += ", counting operations"
     return f"benchmarking {event.implementation_name} ({where})"
@@ -200,7 +199,7 @@ def _build_settings(
     Returns:
         The settings of the benchmark.
     """
-    sizes = _parse_sizes(options.sizes)
+    sizes = _parse_sizes(context, problem, options.sizes)
     _check_problem_sizes(context, problem, sizes)
     counting_operations = options.count_operations and has_trace_format(problem)
     if options.count_operations and not counting_operations:
@@ -282,7 +281,11 @@ def benchmark_command(  # noqa: PLR0913  every Typer option is a parameter
         str,
         typer.Option(
             "--sizes",
-            help="Comma-separated list of input sizes (for example 1000,10000,100000).",
+            help=(
+                "Comma-separated list of input sizes (for example 1000,10000,100000). "
+                "A problem with several dimensions takes name=N parts joined by colons "
+                "for each size (for example vertices=10:edges=30,vertices=20:edges=60)."
+            ),
         ),
     ] = "1000,10000,100000",
     repetitions: Annotated[

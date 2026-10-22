@@ -97,7 +97,7 @@ class SingleRun:
     3``), so two failures can be told apart; it is empty for a pass.
     :data:`PROBLEM_HOOK_CATEGORIES` lists the categories of failures that the
     problem's own hooks cause.
-    ``message`` is empty for a pass. ``focus`` is the position in the output
+    ``message`` is empty for a pass. ``focus`` is the place in the output
     where the problem's ``verify`` found the first problem, when it said (see
     :class:`~algorithm_playground.core.VerificationResult`). ``result``
     is ``None`` when the run produced no output.
@@ -107,7 +107,7 @@ class SingleRun:
     message: str
     category: str = ""
     result: RunResult[object, object] | None = None
-    focus: int | None = None
+    focus: object | None = None
 
     @property
     def has_output(self) -> bool:

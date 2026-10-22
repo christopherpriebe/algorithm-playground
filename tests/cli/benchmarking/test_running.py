@@ -20,6 +20,7 @@ from helpers.support import (
     invoke_cli,
     parse_table_rows,
 )
+from helpers.two_dimensions import add_pair, register_two_dimension_problem
 
 pytestmark = pytest.mark.integration
 
@@ -116,7 +117,10 @@ def test_the_json_report_has_timings_for_every_size(report: dict[str, Any]) -> N
     """Test the JSON report holds the timings of two repetitions at each size."""
     implementation = report["implementations"][0]
 
-    assert {record["size"] for record in implementation["results"]} == {100, 1000}
+    assert sorted(record["size"]["size"] for record in implementation["results"]) == [
+        100,
+        1000,
+    ]
     for record in implementation["results"]:
         assert record["minimum_seconds"] > 0.0
         assert record["median_seconds"] > 0.0
@@ -232,7 +236,7 @@ def test_the_json_report_names_the_problem_the_settings_and_the_host(
 
     assert report["report"] == "benchmark"
     assert report["problem"] == "sorting"
-    assert report["settings"]["sizes"] == [4, 8]
+    assert report["settings"]["sizes"] == [{"size": 4}, {"size": 8}]
     assert report["host"]["system"]
 
 
@@ -257,7 +261,10 @@ def test_the_json_report_holds_one_sample_per_run_of_each_implementation(
     """Test every implementation has one startup sample and one sample per size."""
     for implementation in comparison.report["implementations"]:
         assert len(implementation["startup"]["samples_seconds"]) == 1
-        assert [record["size"] for record in implementation["results"]] == [4, 8]
+        assert [record["size"] for record in implementation["results"]] == [
+            {"size": 4},
+            {"size": 8},
+        ]
         for record in implementation["results"]:
             assert len(record["samples_seconds"]) == 1
             assert len(record["raw_samples_seconds"]) == 1
@@ -360,7 +367,7 @@ def test_a_generator_that_raises_is_reported_once_with_its_distribution(
     result = broken_distribution_run.result
 
     assert_exits_with(result, 1)
-    message = "Could not generate the input of size 3 for the distribution 'broken'"
+    message = "Could not generate the input size=3 for the distribution 'broken'"
     assert result.stdout.count(message) == 1
     assert GENERATOR_MESSAGE in result.stdout
     assert "Traceback" not in result.stdout + result.stderr
@@ -387,7 +394,7 @@ def test_a_generator_that_raises_is_recorded_as_a_distribution_failure_in_the_js
     """Test the report records the broken distribution as a failure of every implementation."""
     report = broken_distribution_run.report
 
-    assert report["format_version"] == 6
+    assert report["format_version"] == 7
     for implementation in report["implementations"]:
         (failure,) = implementation["failures"]
         assert (failure["stage"], failure["distribution"], failure["size"]) == (
@@ -445,7 +452,7 @@ def test_duplicate_sizes_are_a_usage_error(python_sort_executable: Path) -> None
 
     assert result.exit_code == 2
     assert "Sizes must be unique" in result.stderr
-    assert "repeated: 4" in result.stderr
+    assert "repeated: size=4" in result.stderr
 
 
 def test_sizes_that_differ_only_in_notation_are_still_duplicates(
@@ -457,7 +464,7 @@ def test_sizes_that_differ_only_in_notation_are_still_duplicates(
     )
 
     assert_exits_with(result, 2)
-    assert "repeated: 1000" in result.stderr
+    assert "repeated: size=1000" in result.stderr
 
 
 def test_completed_rows_are_printed_before_the_failure(tmp_path: Path) -> None:
@@ -484,7 +491,7 @@ def test_completed_rows_are_printed_before_the_failure(tmp_path: Path) -> None:
     assert len(rows) == 2, output
     assert rows[1].split("│")[1].strip() == "4"
     assert output.index("startup") < output.index("flaky.py failed:")
-    assert "Run failed for size 50" in output
+    assert "Run failed for size=50" in output
 
 
 def test_a_failure_during_startup_prints_only_the_failure(
@@ -503,3 +510,86 @@ def test_a_failure_during_startup_prints_only_the_failure(
     assert result.exit_code == 1
     assert "benchmark — sorting" not in result.stdout
     assert "crashing.py failed:" in result.stdout
+
+
+def test_sizes_with_several_dimensions_label_the_rows_and_the_report(
+    use_fake_runners: UseFakeRunners, tmp_path: Path
+) -> None:
+    """Test a size with two dimensions names both in the table and in the JSON report."""
+    use_fake_runners({"adder": add_pair})
+    name = register_two_dimension_problem()
+    json_path = tmp_path / "report.json"
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder"],
+        *["--sizes", "vertices=2:edges=3,vertices=4:edges=6"],
+        *["--repetitions", "1", "--warmup", "0", "--no-plot"],
+        *["--json", str(json_path)],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert [row[0] for row in parse_table_rows(result.stdout)] == [
+        "startup",
+        "vertices=2 edges=3",
+        "vertices=4 edges=6",
+    ]
+    report = json.loads(json_path.read_text())
+    assert report["settings"]["sizes"] == [
+        {"vertices": 2, "edges": 3},
+        {"vertices": 4, "edges": 6},
+    ]
+    assert report["dimensions"] == [
+        {"name": "vertices", "minimum": 1},
+        {"name": "edges", "minimum": 0},
+    ]
+    assert report["growth_dimension"] == "edges"
+
+
+def test_a_plain_number_is_a_usage_error_for_a_problem_with_several_dimensions(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test a bare number is refused for two dimensions, naming the form to use, before anything runs."""
+    runners = use_fake_runners({"adder": add_pair})
+    name = register_two_dimension_problem()
+
+    result = invoke_cli(
+        "benchmark", name, "--command", "adder", "--sizes", "4", "--no-plot"
+    )
+
+    assert_exits_with(result, 2)
+    assert "vertices=N:edges=N" in result.stderr
+    assert runners.calls == []
+
+
+def test_a_size_below_the_minimum_of_a_dimension_is_a_usage_error(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test a size below the minimum of a dimension is refused with the dimension named."""
+    use_fake_runners({"adder": add_pair})
+    name = register_two_dimension_problem()
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder"],
+        *["--sizes", "vertices=0:edges=3", "--no-plot"],
+    )
+
+    assert_exits_with(result, 2)
+    assert "'vertices' of at least 1" in result.stderr
+
+
+def test_a_size_with_leading_zeros_is_a_usage_error(
+    python_sort_executable: Path,
+) -> None:
+    """Test a size that is not a plainly written integer is a usage error before anything runs."""
+    result = invoke_cli(
+        "benchmark",
+        "sorting",
+        str(python_sort_executable),
+        "--sizes",
+        "0100",
+        "--no-plot",
+    )
+
+    assert_exits_with(result, 2)
+    assert "plain integer" in result.stderr
+    assert result.stdout == ""

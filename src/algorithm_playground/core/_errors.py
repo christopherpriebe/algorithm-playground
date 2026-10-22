@@ -1,6 +1,6 @@
 """The base class of the exceptions that the package raises."""
 
-__all__ = ["AlgorithmPlaygroundError"]
+__all__ = ["AlgorithmPlaygroundError", "CaseError"]
 
 
 class AlgorithmPlaygroundError(Exception):
@@ -12,3 +12,7 @@ class AlgorithmPlaygroundError(Exception):
     to a function (a negative size, a value out of range) is still a plain
     :class:`ValueError` or :class:`TypeError`.
     """
+
+
+class CaseError(AlgorithmPlaygroundError, ValueError):
+    """Raised when a case identifier, a size or a case plan cannot be turned into cases."""

@@ -1,9 +1,8 @@
 """Tests for the sorting problem's cases, failure reports, shrinking, and verification."""
 
-import pytest
-
 from algorithm_playground.core import (
-    CaseError,
+    Dimension,
+    Size,
     assert_valid_problem,
     build_startup_case,
     generate_case,
@@ -27,22 +26,22 @@ def test_generated_cases_are_deterministic(problem: SortingProblem) -> None:
     """Test generating a case twice with the same seed gives the same input."""
     generator = get_default_generator(problem)
 
-    first = generate_case(generator, size=64, seed=123)
-    second = generate_case(generator, size=64, seed=123)
+    first = generate_case(generator, size=Size(size=64), seed=123)
+    second = generate_case(generator, size=Size(size=64), seed=123)
 
     assert first.input_data == second.input_data
 
 
 def test_generated_cases_have_the_requested_size(problem: SortingProblem) -> None:
     """Test a generated case has as many values as requested."""
-    case = generate_case(get_default_generator(problem), size=64, seed=123)
+    case = generate_case(get_default_generator(problem), size=Size(size=64), seed=123)
 
     assert len(case.input_data) == 64
 
 
 def test_generated_values_fit_in_i32(problem: SortingProblem) -> None:
     """Test every value of a generated case fits in a 32-bit signed integer."""
-    case = generate_case(get_default_generator(problem), size=64, seed=123)
+    case = generate_case(get_default_generator(problem), size=Size(size=64), seed=123)
 
     assert all(I32_MIN <= value <= I32_MAX for value in case.input_data)
 
@@ -51,15 +50,15 @@ def test_generated_cases_with_different_seeds_differ(problem: SortingProblem) ->
     """Test generating cases with different seeds gives different inputs."""
     generator = get_default_generator(problem)
 
-    first = generate_case(generator, size=64, seed=1)
-    second = generate_case(generator, size=64, seed=2)
+    first = generate_case(generator, size=Size(size=64), seed=1)
+    second = generate_case(generator, size=Size(size=64), seed=2)
 
     assert first.input_data != second.input_data
 
 
 def test_startup_case_is_empty(problem: SortingProblem) -> None:
     """Test the startup case has no values because the minimum size is zero."""
-    assert problem.minimum_size == 0
+    assert problem.dimensions == (Dimension("size"),)
     assert build_startup_case(problem, seed=5).input_data == []
 
 
@@ -82,12 +81,6 @@ def test_the_operation_names_are_the_keys_of_the_counts(
     counts = problem.operation_counts([], [], trace)
 
     assert tuple(counts or ()) == problem.operation_names
-
-
-def test_negative_size_rejected(problem: SortingProblem) -> None:
-    """Test generating a case of negative size is rejected."""
-    with pytest.raises(CaseError, match="must not be negative"):
-        generate_case(get_default_generator(problem), size=-1, seed=0)
 
 
 def test_satisfies_the_problem_interface(problem: SortingProblem) -> None:
@@ -130,6 +123,17 @@ def test_a_focus_shows_a_window_around_the_first_difference(
     assert text.startswith("[..., ")
     assert "1700" in text
     assert text.endswith(" shown)")
+
+
+def test_a_focus_that_is_not_a_position_describes_the_output_from_its_start(
+    problem: SortingProblem,
+) -> None:
+    """Test a focus the sorting problem cannot place, such as an edge, is ignored."""
+    values = list(range(1000, 2000))
+
+    text = problem.describe_output(values, limit=60, focus=("vertex 2", "vertex 5"))
+
+    assert text == problem.describe_output(values, limit=60)
 
 
 def test_the_input_is_described_from_its_start(problem: SortingProblem) -> None:

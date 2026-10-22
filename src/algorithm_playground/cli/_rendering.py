@@ -12,11 +12,29 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from algorithm_playground.core._dimensions import Size
+
 __all__ = [
     "create_progress_display",
     "create_progress_display_with_bar",
+    "format_size",
     "print_table",
 ]
+
+
+def format_size(size: Size) -> str:
+    """Write a size for a table cell or a message.
+
+    Args:
+        size: The size.
+
+    Returns:
+        The bare value with thousands separators for a size with one dimension,
+        else ``name=value`` for each dimension, joined by spaces.
+    """
+    if len(size) == 1:
+        return f"{next(iter(size.values())):,}"
+    return " ".join(f"{name}={value:,}" for name, value in size.items())
 
 
 def _description_columns() -> list[ProgressColumn]:

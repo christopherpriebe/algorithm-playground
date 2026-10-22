@@ -5,7 +5,7 @@ first, then interleaves the measured repetitions round-robin (repetition 1 of
 every implementation, repetition 2 of every implementation, and so on) so
 that drift in system load affects all implementations equally. Each
 implementation also gets its own startup measurement on the problem's
-startup case (the default generator at the problem's ``minimum_size``), once
+startup case (the default generator at the problem's minimum size), once
 per implementation however many distributions are measured. Inputs come from
 the problem's generators, called distributions here: the settings name them,
 and the default generator alone is used when they name none. Every
@@ -21,7 +21,7 @@ continue and its later distributions still run. A generator of the problem
 that raises fails its distribution for every implementation at once, and the
 other distributions still run; the startup input and the problem's
 ``generators`` hook have to work, because nothing can be measured without
-them. The growth of the median time with the size is reported with its
+them. The growth of the median time with the problem's growth dimension is reported with its
 best-fitting class, and judged unreliable when the medians are too close to the
 startup median (see :meth:`ImplementationBenchmark.is_growth_reliable`). The
 engine never prints, and runs go through a runner factory that tests replace
@@ -33,7 +33,6 @@ import statistics
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import TypeVar
 
 from algorithm_playground.core._cases import (
     AnyCase,
@@ -45,6 +44,7 @@ from algorithm_playground.core._cases import (
     select_generators,
 )
 from algorithm_playground.core._description import describe_error
+from algorithm_playground.core._dimensions import Dimension, Size, get_growth_dimension
 from algorithm_playground.core._hooks import HookError
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem, has_trace_format
@@ -83,19 +83,22 @@ __all__ = [
     "run_benchmark",
 ]
 
-UniqueT = TypeVar("UniqueT", int, str)
-
 # A run is clearly slower than an empty-input run when it exceeds the startup median by
 # this many standard deviations of the startup samples, and by at least this fraction of it.
 NOISE_STANDARD_DEVIATIONS = 3.0
 MINIMUM_NOISE_FRACTION = 0.1
 
 
-def _require_unique(label: str, values: Sequence[UniqueT]) -> None:
-    repeated = sorted({value for value in values if values.count(value) > 1})
-    if repeated:
-        message = f"{label} must be unique, but these were repeated: {repeated}"
-        raise ValueError(message)
+def _list_repeated(values: Sequence[str]) -> list[str]:
+    """List the values that occur more than once, in first-seen order.
+
+    Args:
+        values: The values to check.
+
+    Returns:
+        Each repeated value once.
+    """
+    return [value for value in dict.fromkeys(values) if values.count(value) > 1]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -111,7 +114,7 @@ class BenchmarkSettings:
     """
 
     seed: int
-    sizes: tuple[int, ...]
+    sizes: tuple[Size, ...]
     repetitions: int
     warmup: int
     timeout_seconds: float
@@ -124,11 +127,18 @@ class BenchmarkSettings:
         if not self.sizes:
             message = "At least one size is required"
             raise ValueError(message)
-        if any(size < 0 for size in self.sizes):
-            message = f"Sizes must be non-negative, got {self.sizes}"
+        repeated_sizes = [
+            str(size)
+            for size in dict.fromkeys(self.sizes)
+            if self.sizes.count(size) > 1
+        ]
+        if repeated_sizes:
+            message = f"Sizes must be unique, but these were repeated: {', '.join(repeated_sizes)}"
             raise ValueError(message)
-        _require_unique("Sizes", self.sizes)
-        _require_unique("Distributions", self.distributions)
+        repeated_distributions = sorted(_list_repeated(self.distributions))
+        if repeated_distributions:
+            message = f"Distributions must be unique, but these were repeated: {repeated_distributions}"
+            raise ValueError(message)
         if self.repetitions < 1:
             message = f"Repetitions must be at least 1, got {self.repetitions}"
             raise ValueError(message)
@@ -163,7 +173,7 @@ class BenchmarkProgress:
 
     implementation_name: str
     phase: BenchmarkPhase
-    size: int | None
+    size: Size | None
     completed: bool
     distribution: str | None = None
 
@@ -199,7 +209,7 @@ class SizeMeasurement:
     """
 
     distribution: str
-    size: int
+    size: Size
     case_identifier: str
     raw_samples: tuple[float, ...]
     summary: TimingSummary
@@ -249,7 +259,7 @@ class BenchmarkFailure:
     stage: FailureStage
     message: str
     distribution: str | None = None
-    size: int | None = None
+    size: Size | None = None
 
 
 class CellStatus(Enum):
@@ -265,13 +275,15 @@ class ImplementationBenchmark:
     """Everything measured for one implementation.
 
     ``failures`` lists what went wrong, in the order it happened; ``startup``
-    and ``measurements`` hold whatever completed.
+    and ``measurements`` hold whatever completed. ``growth_dimension`` names
+    the dimension of the size that the growth is fitted against.
     """
 
     implementation: Implementation
     startup: TimingSummary | None
     measurements: tuple[SizeMeasurement, ...]
     failures: tuple[BenchmarkFailure, ...] = ()
+    growth_dimension: str = "size"
 
     @property
     def failure(self) -> str | None:
@@ -291,7 +303,7 @@ class ImplementationBenchmark:
                 return CellStatus.FAILED
         return CellStatus.SKIPPED
 
-    def status_at(self, distribution: str, size: int) -> CellStatus:
+    def status_at(self, distribution: str, size: Size) -> CellStatus:
         """Say what became of the cell for a distribution and size.
 
         A size that was never reached because of an earlier failure is
@@ -334,7 +346,7 @@ class ImplementationBenchmark:
             if measurement.distribution == distribution
         )
 
-    def measurement_at(self, distribution: str, size: int) -> SizeMeasurement | None:
+    def measurement_at(self, distribution: str, size: Size) -> SizeMeasurement | None:
         """Look up the measurement for a distribution and size.
 
         Args:
@@ -369,7 +381,7 @@ class ImplementationBenchmark:
         measurements = self.measurements_for(distribution)
         startup_seconds = self.startup.median if self.startup is not None else 0.0
         return estimate_growth(
-            [measurement.size for measurement in measurements],
+            [measurement.size[self.growth_dimension] for measurement in measurements],
             [
                 statistics.median(measurement.raw_samples) - startup_seconds
                 for measurement in measurements
@@ -433,7 +445,10 @@ class ImplementationBenchmark:
         ]
         return {
             name: estimate_growth(
-                [measurement.size for measurement in measurements],
+                [
+                    measurement.size[self.growth_dimension]
+                    for measurement in measurements
+                ],
                 [
                     (measurement.operation_counts or {}).get(name, 0)
                     for measurement in measurements
@@ -450,6 +465,8 @@ class BenchmarkReport:
     problem_name: str
     settings: BenchmarkSettings
     implementations: tuple[ImplementationBenchmark, ...]
+    dimensions: tuple[Dimension, ...] = (Dimension("size"),)
+    growth_dimension: str = "size"
 
     @property
     def has_passed(self) -> bool:
@@ -465,7 +482,7 @@ class _MeasurementPoint:
     """
 
     label: str
-    size: int | None = None
+    size: Size | None = None
     distribution: str | None = None
 
     @property
@@ -525,6 +542,7 @@ class _Benchmark:
         for generator in generators:
             for name, measurement in self._measure_distribution(generator, startups):
                 measurements[name].append(measurement)
+        growth_dimension = get_growth_dimension(self._problem).name
         return BenchmarkReport(
             problem_name=self._problem.name,
             settings=self._settings,
@@ -534,13 +552,16 @@ class _Benchmark:
                     startup=startups.get(implementation.name),
                     measurements=tuple(measurements[implementation.name]),
                     failures=tuple(self.failures.get(implementation.name, ())),
+                    growth_dimension=growth_dimension,
                 )
                 for implementation in self._implementations
             ),
+            dimensions=tuple(self._problem.dimensions),
+            growth_dimension=growth_dimension,
         )
 
     def _measure_point(
-        self, case: AnyCase, distribution: str, size: int
+        self, case: AnyCase, distribution: str, size: Size
     ) -> tuple[
         dict[str, list[float]], dict[str, Mapping[str, int]], dict[str, OperationIssue]
     ]:
@@ -556,7 +577,7 @@ class _Benchmark:
             run, the operation counts of those that reported some, and the
             issues of those that could not.
         """
-        point = _MeasurementPoint(f"size {size} ({distribution})", size, distribution)
+        point = _MeasurementPoint(f"{size} ({distribution})", size, distribution)
         samples = self._measure(case.input_data, point)
         if not self._settings.count_operations:
             return samples, {}, {}
@@ -650,7 +671,7 @@ class _Benchmark:
             except HookError as error:
                 self._fail_distribution(
                     generator.name,
-                    f"Could not generate the input of size {size:,} for the distribution "
+                    f"Could not generate the input {size} for the distribution "
                     f"'{generator.name}': {error}",
                 )
                 return
@@ -664,7 +685,7 @@ class _Benchmark:
         startups: Mapping[str, TimingSummary],
         *,
         distribution: str,
-        size: int,
+        size: Size,
     ) -> Iterator[tuple[str, SizeMeasurement]]:
         samples, counts, issues = self._measure_point(case, distribution, size)
         for name, raw_samples in samples.items():
@@ -919,6 +940,7 @@ def include_failed_implementations(
             startup=None,
             measurements=(),
             failures=(failures[implementation.name],),
+            growth_dimension=report.growth_dimension,
         )
         for implementation in implementations
     )
@@ -962,7 +984,7 @@ def run_benchmark(
 
     It raises ``ValueError`` if there is no implementation or names repeat,
     ``CaseError`` for a distribution the problem does not define and for a size
-    below the problem's ``minimum_size``, and ``HookError`` when the problem's
+    that is not one the problem accepts, and ``HookError`` when the problem's
     ``generators`` hook raises or the generator of the startup input does.
 
     Args:
@@ -979,6 +1001,12 @@ def run_benchmark(
     """
     validate_implementations(implementations)
     check_sizes(problem, settings.sizes)
+    canonical_sizes = tuple(
+        Size(
+            **{dimension.name: size[dimension.name] for dimension in problem.dimensions}
+        )
+        for size in settings.sizes
+    )
     generators = (
         select_generators(problem, settings.distributions)
         if settings.distributions
@@ -986,6 +1014,7 @@ def run_benchmark(
     )
     settings = replace(
         settings,
+        sizes=canonical_sizes,
         distributions=tuple(generator.name for generator in generators),
         count_operations=settings.count_operations and has_trace_format(problem),
     )

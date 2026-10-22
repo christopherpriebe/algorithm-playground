@@ -13,6 +13,7 @@ from algorithm_playground.core import (
     CaseError,
     CaseOrigin,
     CasePlan,
+    Dimension,
     Fixture,
     FixtureOrigin,
     GeneratedOrigin,
@@ -20,6 +21,7 @@ from algorithm_playground.core import (
     InputGenerator,
     Problem,
     ShrunkOrigin,
+    Size,
     VerificationResult,
     build_cases,
     build_startup_case,
@@ -32,6 +34,7 @@ from algorithm_playground.core import (
     resolve_case,
     select_generators,
 )
+from algorithm_playground.problems.sorting import SortingProblem
 
 
 def generate_random_values(random_generator: random.Random, size: int) -> list[int]:
@@ -44,7 +47,10 @@ def generate_zeros(_random_generator: random.Random, size: int) -> list[int]:
     return [0] * size
 
 
-def generate_by_raising(_random_generator: random.Random, _size: int) -> list[int]:
+def generate_by_raising(
+    _random_generator: random.Random,
+    size: int,  # noqa: ARG001  signature fixed by the generator contract
+) -> list[int]:
     """Fail for every size, as a generator that is broken."""
     message = "generator exploded"
     raise RuntimeError(message)
@@ -103,7 +109,7 @@ class NeedsThreeProblem(TwoGeneratorProblem):
     """A problem whose inputs have at least three elements."""
 
     name = "needs-three"
-    minimum_size = 3
+    dimensions = (Dimension("size", minimum=3),)
 
     @override
     def fixtures(self) -> Iterator[Fixture[list[int]]]:
@@ -189,7 +195,9 @@ def problem() -> TwoGeneratorProblem:
     [
         (FixtureOrigin("empty"), "fixture:empty"),
         (
-            GeneratedOrigin(generator_name="nearly_sorted", seed=1234567, size=37),
+            GeneratedOrigin(
+                generator_name="nearly_sorted", seed=1234567, size=Size(size=37)
+            ),
             "generated:nearly_sorted:size=37:seed=1234567",
         ),
         (ShrunkOrigin("fixture:empty"), "shrunk:fixture:empty"),
@@ -206,9 +214,11 @@ def test_origins_print_stable_identifiers(origin: CaseOrigin, identifier: str) -
     [
         FixtureOrigin("empty"),
         FixtureOrigin("name:with:colons"),
-        GeneratedOrigin(generator_name="nearly_sorted", seed=1234567, size=37),
-        GeneratedOrigin(generator_name="uniform", seed=0, size=0),
-        GeneratedOrigin(generator_name="uniform", seed=-5, size=3),
+        GeneratedOrigin(
+            generator_name="nearly_sorted", seed=1234567, size=Size(size=37)
+        ),
+        GeneratedOrigin(generator_name="uniform", seed=0, size=Size(size=0)),
+        GeneratedOrigin(generator_name="uniform", seed=-5, size=Size(size=3)),
     ],
     ids=[
         "fixture",
@@ -233,8 +243,8 @@ def test_fixture_and_generated_identifiers_parse_back(
         ("generated:uniform", "Unrecognized case identifier"),
         ("generated:uniform:size=x:seed=1", "no valid 'size=N' part"),
         ("generated:uniform:size=3:seed=", "no valid 'seed=N' part"),
-        ("generated:uniform:seed=1:size=3", "no valid 'size=N' part"),
-        ("generated:uniform:size=-1:seed=1", "negative size"),
+        ("generated:uniform:seed=1:size=3", "no valid 'seed=N' part"),
+        ("generated:uniform:size=-1:seed=1", "negative"),
         ("generated:uniform:size=05:seed=1", "no valid 'size=N' part"),
         ("generated:uniform:size=+5:seed=1", "no valid 'size=N' part"),
         ("generated:uniform:size=1_0:seed=1", "no valid 'size=N' part"),
@@ -291,7 +301,7 @@ def test_a_fixture_case_carries_the_description_of_the_fixture() -> None:
 
 def test_a_size_below_the_minimum_of_the_problem_is_an_error() -> None:
     """Test a generated identifier whose size is below the problem's minimum is rejected."""
-    with pytest.raises(CaseError, match="at least 3 elements"):
+    with pytest.raises(CaseError, match="at least 3"):
         resolve_case(NeedsThreeProblem(), "generated:random:size=2:seed=1")
 
 
@@ -307,7 +317,7 @@ def test_an_unknown_fixture_lists_the_available_ones(
 
 def test_a_generated_case_is_rebuilt_exactly(problem: TwoGeneratorProblem) -> None:
     """Test resolving the identifier of a generated case reproduces the case."""
-    original = generate_case(problem.generators()[0], size=12, seed=99)
+    original = generate_case(problem.generators()[0], size=Size(size=12), seed=99)
 
     assert resolve_case(problem, original.identifier) == original
 
@@ -327,17 +337,13 @@ def test_uses_a_random_generator_seeded_with_the_seed(
     problem: TwoGeneratorProblem,
 ) -> None:
     """Test the input comes from a random generator seeded with the seed of the case."""
-    case = generate_case(problem.generators()[0], size=5, seed=7)
+    case = generate_case(problem.generators()[0], size=Size(size=5), seed=7)
 
     expected = random.Random(7)  # noqa: S311  seeded generator for reproducible inputs, not cryptography
     assert case.input_data == [expected.randrange(100) for _ in range(5)]
-    assert case.origin == GeneratedOrigin(generator_name="random", seed=7, size=5)
-
-
-def test_rejects_a_negative_size(problem: TwoGeneratorProblem) -> None:
-    """Test a negative size is an error."""
-    with pytest.raises(CaseError, match="negative"):
-        generate_case(problem.generators()[0], size=-1, seed=0)
+    assert case.origin == GeneratedOrigin(
+        generator_name="random", seed=7, size=Size(size=5)
+    )
 
 
 def test_the_default_generator_is_the_first(problem: TwoGeneratorProblem) -> None:
@@ -371,15 +377,15 @@ def test_startup_case_follows_the_minimum_size_of_the_problem() -> None:
 
 def test_check_sizes_accepts_sizes_at_or_above_the_minimum() -> None:
     """Test sizes that reach the minimum size of the problem pass the check."""
-    check_sizes(NeedsThreeProblem(), (3, 4))
+    check_sizes(NeedsThreeProblem(), (Size(size=3), Size(size=4)))
 
 
 def test_check_sizes_names_the_sizes_that_are_too_small() -> None:
     """Test sizes below the minimum size are named in the error."""
     with pytest.raises(
-        CaseError, match=r"at least 3 elements, but the sizes include 0, 2"
+        CaseError, match=r"'size' of at least 3, but the sizes include size=0, size=2"
     ):
-        check_sizes(NeedsThreeProblem(), (2, 5, 0))
+        check_sizes(NeedsThreeProblem(), (Size(size=2), Size(size=5), Size(size=0)))
 
 
 def test_rejects_a_negative_random_case_count() -> None:
@@ -389,9 +395,9 @@ def test_rejects_a_negative_random_case_count() -> None:
 
 
 def test_rejects_a_negative_maximum_size() -> None:
-    """Test a plan cannot have a negative maximum size."""
-    with pytest.raises(CaseError, match="maximum size"):
-        CasePlan(maximum_size=-1)
+    """Test a plan cannot have a negative maximum size, since no size can be negative."""
+    with pytest.raises(ValueError, match="negative"):
+        CasePlan(maximum_size=Size(size=-1))
 
 
 def test_fixtures_come_first_then_generated_cases(problem: TwoGeneratorProblem) -> None:
@@ -436,12 +442,16 @@ def test_generators_take_turns_and_shift_by_one_every_round(
 def test_every_generator_covers_the_whole_range_of_sizes(generator_count: int) -> None:
     """Test each generator gets small and large sizes, and their largest sizes are close."""
     problem = build_many_generator_problem(generator_count)
-    plan = CasePlan(include_fixtures=False, random_case_count=20, maximum_size=100)
+    plan = CasePlan(
+        include_fixtures=False, random_case_count=20, maximum_size=Size(size=100)
+    )
     sizes_by_generator: dict[str, list[int]] = {}
 
     for case in build_cases(problem, plan):
         origin = get_generated_origin(case)
-        sizes_by_generator.setdefault(origin.generator_name, []).append(origin.size)
+        sizes_by_generator.setdefault(origin.generator_name, []).append(
+            origin.size["size"]
+        )
 
     assert len(sizes_by_generator) == generator_count
     for sizes in sizes_by_generator.values():
@@ -497,10 +507,15 @@ def test_sizes_stay_within_bounds_and_favor_small_inputs(
 ) -> None:
     """Test sizes span zero to the maximum, with more than half of them small."""
     plan = CasePlan(
-        include_fixtures=False, random_case_count=40, maximum_size=100, seed=1
+        include_fixtures=False,
+        random_case_count=40,
+        maximum_size=Size(size=100),
+        seed=1,
     )
 
-    sizes = [get_generated_origin(case).size for case in build_cases(problem, plan)]
+    sizes = [
+        get_generated_origin(case).size["size"] for case in build_cases(problem, plan)
+    ]
 
     assert min(sizes) == 0
     assert max(sizes) <= 100
@@ -510,19 +525,24 @@ def test_sizes_stay_within_bounds_and_favor_small_inputs(
 
 def test_sizes_start_at_the_minimum_size_of_the_problem() -> None:
     """Test generated sizes begin at the minimum size of the problem and respect the maximum."""
-    plan = CasePlan(include_fixtures=False, random_case_count=30, maximum_size=20)
+    plan = CasePlan(
+        include_fixtures=False, random_case_count=30, maximum_size=Size(size=20)
+    )
 
     cases = build_cases(NeedsThreeProblem(), plan)
 
-    sizes = [get_generated_origin(case).size for case in cases]
+    sizes = [get_generated_origin(case).size["size"] for case in cases]
     assert min(sizes) == 3
     assert max(sizes) <= 20
 
 
 def test_a_maximum_size_below_the_minimum_size_is_an_error() -> None:
     """Test a maximum size under the minimum size of the problem is rejected."""
-    with pytest.raises(CaseError, match="maximum size 2 is below the smallest size"):
-        build_cases(NeedsThreeProblem(), CasePlan(random_case_count=1, maximum_size=2))
+    with pytest.raises(CaseError, match=r"maximum size=2 is below the smallest"):
+        build_cases(
+            NeedsThreeProblem(),
+            CasePlan(random_case_count=1, maximum_size=Size(size=2)),
+        )
 
 
 def test_fixtures_carry_their_descriptions() -> None:
@@ -537,7 +557,9 @@ def test_a_maximum_size_of_zero_gives_only_empty_inputs(
     problem: TwoGeneratorProblem,
 ) -> None:
     """Test a maximum size of zero makes every generated input empty."""
-    plan = CasePlan(include_fixtures=False, random_case_count=5, maximum_size=0)
+    plan = CasePlan(
+        include_fixtures=False, random_case_count=5, maximum_size=Size(size=0)
+    )
 
     lengths = {len(case.input_data) for case in build_cases(problem, plan)}
 
@@ -657,3 +679,19 @@ def test_an_error_of_the_caller_is_still_a_case_error(
     """Test asking for an unknown distribution is a case error, not a hook error."""
     with pytest.raises(CaseError, match="Unknown distribution 'nope'"):
         select_generators(problem, ("nope",))
+
+
+def test_a_plan_with_one_dimension_builds_the_cases_it_always_built() -> None:
+    """Test the generated cases of a one-dimension plan are the ones of earlier releases."""
+    plan = CasePlan(include_fixtures=False, random_case_count=6, seed=3)
+
+    cases = build_cases(SortingProblem(), plan)
+
+    assert [case.identifier for case in cases] == [
+        "generated:uniform:size=2:seed=1290092075",
+        "generated:sorted:size=9:seed=1339507103",
+        "generated:reversed:size=13:seed=3568317782",
+        "generated:nearly_sorted:size=36:seed=994883252",
+        "generated:few_unique:size=59:seed=3277272730",
+        "generated:all_equal:size=91:seed=947895021",
+    ]

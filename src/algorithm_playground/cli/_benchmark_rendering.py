@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from algorithm_playground.cli._rendering import print_table
+from algorithm_playground.cli._rendering import format_size, print_table
 from algorithm_playground.core._benchmarking import (
     BenchmarkReport,
     CellStatus,
@@ -32,6 +32,7 @@ from algorithm_playground.core._benchmarking import (
     OperationIssueKind,
     SizeMeasurement,
 )
+from algorithm_playground.core._dimensions import Size
 from algorithm_playground.core._statistics import Growth, TimingSummary, format_duration
 from algorithm_playground.visualization import AxisScale, ChartSeries, render_line_chart
 
@@ -47,6 +48,19 @@ __all__ = [
 
 STARTUP_ROW_LABEL = "startup"
 GROWTH_ROW_LABEL = "growth"
+
+
+def _growth_row_label(report: BenchmarkReport) -> str:
+    """Name the growth row, and the dimension it follows when the size has several.
+
+    Returns:
+        The label.
+    """
+    if len(report.dimensions) == 1:
+        return GROWTH_ROW_LABEL
+    return f"{GROWTH_ROW_LABEL} (n = {report.growth_dimension})"
+
+
 FAILED_CELL = "[red]failed[/red]"
 SKIPPED_CELL = "[dim]skipped[/dim]"
 UNAVAILABLE_CELL = "[dim]-[/dim]"
@@ -150,11 +164,11 @@ def _build_single_table(
         _add_distribution_header(table, report, distribution)
         for measurement in result.measurements_for(distribution):
             _add_summary_row(
-                table, f"{measurement.size:,}", measurement.summary, unit=unit
+                table, format_size(measurement.size), measurement.summary, unit=unit
             )
         if result.growth(distribution) is not None:
             table.add_row(
-                GROWTH_ROW_LABEL,
+                _growth_row_label(report),
                 "",
                 _format_timing_growth(result, distribution),
                 "",
@@ -164,7 +178,7 @@ def _build_single_table(
 
 
 def _median_at(
-    benchmark: ImplementationBenchmark, distribution: str, size: int
+    benchmark: ImplementationBenchmark, distribution: str, size: Size
 ) -> float | None:
     measurement = benchmark.measurement_at(distribution, size)
     return None if measurement is None else measurement.summary.median
@@ -225,7 +239,7 @@ def _operation_names(report: BenchmarkReport) -> tuple[str, ...]:
 
 
 def _operation_cell(
-    benchmark: ImplementationBenchmark, distribution: str, size: int, *, operation: str
+    benchmark: ImplementationBenchmark, distribution: str, size: Size, *, operation: str
 ) -> str:
     """Format one count of one measurement, or say why there is none.
 
@@ -253,7 +267,7 @@ def _build_operation_table(report: BenchmarkReport, operation: str) -> Table:
         _add_distribution_header(table, report, distribution)
         for size in report.settings.sizes:
             table.add_row(
-                f"{size:,}",
+                format_size(size),
                 *(
                     _operation_cell(benchmark, distribution, size, operation=operation)
                     for benchmark in report.implementations
@@ -265,7 +279,8 @@ def _build_operation_table(report: BenchmarkReport, operation: str) -> Table:
         ]
         if any(growth is not None for growth in growths):
             table.add_row(
-                GROWTH_ROW_LABEL, *(_format_growth(growth) for growth in growths)
+                _growth_row_label(report),
+                *(_format_growth(growth) for growth in growths),
             )
     return table
 
@@ -303,12 +318,12 @@ def _print_comparison_footer(console: Console, report: BenchmarkReport) -> None:
 
 
 def _plottable_points(
-    measurements: tuple[SizeMeasurement, ...],
+    measurements: tuple[SizeMeasurement, ...], growth_dimension: str
 ) -> list[tuple[int, float]]:
     return [
-        (measurement.size, measurement.summary.median)
+        (measurement.size[growth_dimension], measurement.summary.median)
         for measurement in measurements
-        if measurement.size > 0 and measurement.summary.median > 0
+        if measurement.size[growth_dimension] > 0 and measurement.summary.median > 0
     ]
 
 
@@ -317,7 +332,9 @@ def _build_median_series(report: BenchmarkReport) -> list[ChartSeries]:
     series: list[ChartSeries] = []
     for benchmark in report.implementations:
         for distribution in distributions:
-            points = _plottable_points(benchmark.measurements_for(distribution))
+            points = _plottable_points(
+                benchmark.measurements_for(distribution), report.growth_dimension
+            )
             if points:
                 name = benchmark.implementation.name
                 series.append(
@@ -400,10 +417,10 @@ class _ComparisonTable:
             ),
         )
 
-    def _add_size_row(self, table: Table, distribution: str, size: int) -> None:
+    def _add_size_row(self, table: Table, distribution: str, size: Size) -> None:
         reference_median = _median_at(self.reference, distribution, size)
         table.add_row(
-            f"{size:,}",
+            format_size(size),
             *(
                 _comparison_cell(
                     _median_at(benchmark, distribution, size),
@@ -419,7 +436,7 @@ class _ComparisonTable:
         benchmarks = self.report.implementations
         if any(benchmark.growth(distribution) is not None for benchmark in benchmarks):
             table.add_row(
-                GROWTH_ROW_LABEL,
+                _growth_row_label(self.report),
                 *(
                     _format_timing_growth(benchmark, distribution)
                     for benchmark in benchmarks
@@ -519,7 +536,7 @@ def print_operation_issues(console: Console, report: BenchmarkReport) -> None:
                 continue
             console.print(
                 f"[yellow]{escape(benchmark.implementation.name)} "
-                f"({escape(measurement.distribution)}, size {measurement.size:,}): "
+                f"({escape(measurement.distribution)}, {measurement.size}): "
                 f"no operation counts, {issue.kind.value}:[/yellow] {escape(issue.message)}",
                 soft_wrap=True,
             )
@@ -600,7 +617,7 @@ def plot_medians(
     draw_chart(
         series,
         title=f"{report.problem_name}: median wall time against size",
-        x_label="size",
+        x_label="size" if len(report.dimensions) == 1 else report.growth_dimension,
         y_label=f"median seconds{startup_note}",
         x_scale=AxisScale.LOGARITHMIC,
         y_scale=AxisScale.LOGARITHMIC,

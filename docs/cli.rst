@@ -159,8 +159,9 @@ With a problem name, ``list`` shows what that problem offers instead:
   failure report when the fixture fails);
 * its **distributions**, with their descriptions and a
   ``used as`` column that marks the default (the first, used by ``benchmark``)
-  and the one ``debug`` prefers, and a note on the smallest size when the
-  problem does not start at 0;
+  and the one ``debug`` prefers;
+* its **dimensions** (``Dimensions: vertices (at least 1), edges.``), when it has
+  more than one or one starts above 0;
 * whether it has a **trace format** (``debug`` and ``benchmark
   --count-operations`` need one) and, when it says, the **operations** that a
   benchmark counts from a trace;
@@ -175,7 +176,7 @@ With a problem name, ``list`` shows what that problem offers instead:
    $ algorithm-playground test PROBLEM [IMPLEMENTATION]... \
        [--command TEXT]... [--configuration PATH] [--problem-module NAME]... \
        [--name TEXT]... [--build / --no-build] [--inherit-environment] \
-       [--random-cases N] [--maximum-size N] [--seed N] [--distribution NAME]... \
+       [--random-cases N] [--maximum-size SIZE] [--seed N] [--distribution NAME]... \
        [--no-fixtures] [--fixture NAME]... [--case IDENTIFIER]... \
        [--shrink / --no-shrink] [--maximum-failures N] [--verbose] \
        [--timeout SECONDS] [--keep-temporary-files] \
@@ -188,7 +189,9 @@ and check every output with the problem's verifier. A case is either a
 problem's seeded input distributions at some size. By default ``test`` runs
 every fixture followed by 20 generated cases whose sizes range from the
 problem's smallest size (0 for most problems) to 100, with small sizes favored
-because most bugs live there. The distributions take turns, shifted by one every
+because most bugs live there. A problem whose inputs have several dimensions
+(a graph has ``vertices`` and ``edges``) draws each dimension from its own
+minimum to its own default maximum, and the dimensions vary independently. The distributions take turns, shifted by one every
 round, so each of them gets small and large sizes alike. The same options always
 produce the same cases.
 
@@ -200,10 +203,13 @@ accepted by ``--case``:
 
 ``generated:DISTRIBUTION:size=N:seed=N``
    What the distribution ``DISTRIBUTION`` returns for size ``N`` and seed ``N``,
-   for example ``generated:uniform:size=37:seed=1234567``. Each generated case has
-   its own seed, derived from ``--seed`` and the position of the case. The
-   numbers are plain integers: ``size=05``, ``size=+5``, ``size=1_0`` and a number
-   with spaces are usage errors, not guesses.
+   for example ``generated:uniform:size=37:seed=1234567``. A problem with several
+   dimensions names each of them, in the order it declares them:
+   ``generated:exact:vertices=100:edges=500:seed=1`` (an identifier that lists
+   them in another order is accepted and rebuilds the same case). Each generated
+   case has its own seed, derived from ``--seed`` and the position of the case.
+   The numbers are plain integers: ``size=05``, ``size=+5``, ``size=1_0`` and a
+   number with spaces are usage errors, not guesses.
 
 The result is a matrix with one column per implementation. The fixtures are one
 row, ``fixtures``, that counts how many passed (``24/24``); a fixture that some
@@ -356,9 +362,14 @@ Choosing cases:
    are spread over the distributions in turn, so with several distributions
    each gets a share.
 
-``--maximum-size N``
-   Largest size of a generated case (default: ``100``). Sizes are spread from
-   ``0`` to ``N`` with small sizes over-represented.
+``--maximum-size SIZE``
+   Largest size of a generated case (default: the default maximum of each
+   dimension, ``100`` unless the problem says otherwise). Sizes are spread from
+   the minimum of each dimension to ``SIZE`` with small sizes over-represented.
+   For a problem with one dimension ``SIZE`` is a plain number (``--maximum-size
+   50``); for several it names each dimension once, joined by colons
+   (``--maximum-size vertices=50:edges=200``). A size that names other
+   dimensions, or is below a minimum, is a usage error.
 
 ``--seed N``
    Seed that determines every generated case (default: ``0``). A different
@@ -417,7 +428,9 @@ Other options:
    directory, a parent that is a file, or a directory without write permission is
    a usage error with exit code ``2``), and so is a failure while writing the
    file. ``report`` says what kind of report it is and ``format_version`` changes
-   whenever a key is renamed, removed, or reinterpreted (currently ``2``; version
+   whenever a key is renamed, removed, or reinterpreted (currently ``3``; version
+   3 added ``dimensions`` and turned every size, and ``settings.maximum_size``,
+   into an object with one integer per dimension; version
    2 added ``report``, ``settings``, and the ``command``, ``files``,
    ``inherit_environment`` and ``timeout_seconds`` of every implementation, renamed
    the ``generator`` key of a case to ``distribution``, and added ``shrink_note``
@@ -429,22 +442,24 @@ Other options:
 
       {
         "report": "test",
-        "format_version": 2,
+        "format_version": 3,
         "problem": "sorting",
         "passed": false,
         "settings": {
           "cases": "planned" | "explicit",
-          "seed", "random_cases", "maximum_size",    (null when explicit)
+          "seed", "random_cases",                    (null when explicit)
+          "maximum_size": {"size": 100},             (null when explicit)
           "distributions": ["uniform", ...],         (null when explicit)
           "include_fixtures": true | false,          (null when explicit)
           "shrink": {"enabled", "maximum_shrunk_cases", "maximum_runs",
                      "time_budget_seconds"},
           "timeout_seconds"
         },
+        "dimensions": [{"name": "size", "minimum": 0}],
         "cases": [
           {"identifier": "fixture:empty", "kind": "fixture", "fixture"},
           {"identifier": "generated:uniform:size=12:seed=5", "kind": "generated",
-           "distribution", "size", "seed"}
+           "distribution", "size": {"size": 12}, "seed"}
         ],
         "implementations": [
           {"name", "command": [...], "working_directory",
@@ -486,7 +501,7 @@ Other options:
        [--command TEXT]... [--configuration PATH] [--problem-module NAME]... \
        [--name TEXT]... [--build / --no-build] [--inherit-environment] \
        [--reference NAME] [--distribution NAME]... [--seed N] \
-       [--sizes 1000,10000,100000] \
+       [--sizes SIZE,SIZE,...] \
        [--repetitions 5] [--warmup 1] [--timeout SECONDS] \
        [--json FILE] [--plot / --no-plot] [--verify / --no-verify] \
        [--subtract-startup-time] [--count-operations]
@@ -504,8 +519,8 @@ implementation equally. An unknown distribution is a usage error (exit code
 smallest size.
 
 Before the sized runs, each implementation is also timed on the smallest input
-(the problem's default distribution at its ``minimum_size``, which is 0 for most
-problems, an empty input) with the same warmup and repetition counts. That row,
+(the problem's default distribution at the minimum of every dimension, which is 0
+for most problems, an empty input) with the same warmup and repetition counts. That row,
 labelled ``startup``, shows the fixed cost every run
 pays: process startup, interpreter or runtime initialization, and file I/O.
 For an interpreted implementation this can dominate small sizes. The startup
@@ -707,8 +722,18 @@ escape codes.
 
 ``--sizes``
    Comma-separated list of input sizes (default: ``1000,10000,100000``).
-   Underscores are allowed for readability (for example ``--sizes 100_000``). Each
-   size may appear once; repeating one is a usage error.
+   Underscores are allowed for readability (for example ``--sizes 100_000``).
+   A value is a plainly written integer: no leading zeros or plus sign, and
+   underscores only between digits. For
+   a problem with one dimension a size is a plain number. For a problem with
+   several, a size names each dimension once as ``name=N`` parts joined by
+   colons, in any order, for example ``--sizes
+   vertices=100:edges=300,vertices=200:edges=600``; a plain number is a usage
+   error that spells the form. Each size may appear once; repeating one is a
+   usage error that lists it as ``size=4``. The tables show a size of one
+   dimension as the bare number and a size of several as ``vertices=100
+   edges=300``, and the growth row follows the problem's growth dimension
+   (``growth (n = edges)`` when there are several).
 
 ``--repetitions``
    Number of measured runs per size (default: ``5``).
@@ -736,8 +761,10 @@ escape codes.
    ``raw_samples_seconds`` holds the unadjusted wall times in the order the runs
    happened. Results are listed distribution by distribution, in the order of
    ``settings.distributions``, and by size within each. ``format_version``
-   changes whenever a key is renamed, removed, or reinterpreted (currently ``6``;
-   version 2 renamed ``case_name`` to ``case_identifier`` and added
+   changes whenever a key is renamed, removed, or reinterpreted (currently ``7``;
+   version 7 added ``dimensions`` and ``growth_dimension`` and turned every size
+   (``settings.sizes``, the ``size`` of results and failures) into an object with
+   one integer per dimension; version 2 renamed ``case_name`` to ``case_identifier`` and added
    ``distribution`` and ``settings.distributions``; version 3 added
    ``settings.count_operations``, ``operation_counts`` and ``operation_growth``;
    version 4 added ``report``, renamed ``growth`` to ``time_growth``, replaced
@@ -753,12 +780,14 @@ escape codes.
 
       {
         "report": "benchmark",
-        "format_version": 6,
+        "format_version": 7,
         "problem": "sorting",
-        "settings": {"seed", "sizes", "repetitions", "warmup",
+        "settings": {"seed", "sizes": [{"size": 1000}, ...], "repetitions", "warmup",
                      "timeout_seconds", "verify_outputs",
                      "subtract_startup_time", "count_operations",
                      "distributions": ["uniform", ...]},
+        "dimensions": [{"name": "size", "minimum": 0}],
+        "growth_dimension": "size",
         "implementations": [
           {"name", "command", "working_directory",
            "inherit_environment", "timeout_seconds" (null: the default),
@@ -766,10 +795,10 @@ escape codes.
            "failures": [{"stage": "build" | "cannot run" | "startup" | "measurement"
                                  | "distribution",
                          "distribution" (null unless measurement or distribution),
-                         "size" (null unless measurement),
+                         "size": {"size": 8} (null unless measurement),
                          "message"}],
            "startup": {...},
-           "results": [{"distribution", "size",
+           "results": [{"distribution", "size": {"size": 1000},
                         "case_identifier" (for example
                         "generated:uniform:size=1000:seed=0"),
                         "operation_counts": null or {"compares", "swaps",
@@ -822,7 +851,7 @@ escape codes.
    $ algorithm-playground debug PROBLEM [IMPLEMENTATION] \
        [--command TEXT] [--configuration PATH] [--problem-module NAME]... \
        [--name TEXT] [--build / --no-build] [--inherit-environment] \
-       [--seed N] [--size N] [--distribution NAME] \
+       [--seed N] [--size SIZE] [--distribution NAME] \
        [--fixture NAME] [--case IDENTIFIER] [--input-file PATH] \
        [--auto-advance] [--delay-milliseconds N] [--timeout SECONDS]
 
@@ -906,8 +935,10 @@ Options:
    Seed for generated input (default: ``0``).
 
 ``--size``
-   Size of generated input (default: ``16``, or the problem's smallest size if
-   that is larger).
+   Size of generated input (default: ``16`` for every dimension, or its
+   smallest value if that is larger). The same form as ``benchmark --sizes``: a
+   plain number for a problem with one dimension, ``name=N`` parts joined by
+   colons for several (``--size vertices=10:edges=30``).
 
 ``--distribution``
    Name of the distribution to generate from. Default: the distribution the

@@ -16,6 +16,7 @@ from helpers.support import (
     parse_table_rows,
     replace_command_dependencies,
 )
+from helpers.two_dimensions import add_pair, register_two_dimension_problem
 
 pytestmark = pytest.mark.integration
 
@@ -213,7 +214,7 @@ def test_a_failure_in_one_distribution_is_reported_with_its_name(
 
     assert_exits_with(result, 1)
     assert "picky failed:" in result.stdout
-    assert "size 4 (sorted)" in result.stdout
+    assert "size=4 (sorted)" in result.stdout
     picky_cells: dict[tuple[str, str], str] = {}
     section = ""
     for row in parse_table_rows(result.stdout):
@@ -417,18 +418,18 @@ def test_the_json_report_records_distributions_and_growth(
     assert result.exit_code == 0, result.stdout
     report = json.loads(json_path.read_text())
     assert report["report"] == "benchmark"
-    assert report["format_version"] == 6
+    assert report["format_version"] == 7
     assert report["settings"]["distributions"] == ["sorted", "all_equal"]
     (implementation,) = report["implementations"]
     assert [
         (record["distribution"], record["size"]) for record in implementation["results"]
     ] == [
-        ("sorted", 100),
-        ("sorted", 200),
-        ("sorted", 400),
-        ("all_equal", 100),
-        ("all_equal", 200),
-        ("all_equal", 400),
+        ("sorted", {"size": 100}),
+        ("sorted", {"size": 200}),
+        ("sorted", {"size": 400}),
+        ("all_equal", {"size": 100}),
+        ("all_equal", {"size": 200}),
+        ("all_equal", {"size": 400}),
     ]
     assert (
         implementation["results"][0]["case_identifier"]
@@ -505,3 +506,29 @@ def test_several_distributions_draw_one_series_per_implementation_and_distributi
         "second (reversed)",
     ]
     assert all(line.x_values == (10, 100, 1000) for line in plotted)
+
+
+def test_the_growth_row_names_the_dimension_it_follows_when_there_are_several(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test the growth row of a problem with two dimensions says which one it follows."""
+    use_fake_runners({"adder": add_pair}, {"adder": lambda pair: 0.01 + 1e-3 * pair[1]})
+    name = register_two_dimension_problem()
+    sizes = ",".join(f"vertices=2:edges={edges}" for edges in (100, 200, 400, 800))
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder", "--sizes", sizes],
+        *[
+            "--repetitions",
+            "1",
+            "--warmup",
+            "0",
+            "--no-plot",
+            "--subtract-startup-time",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    growth_row = parse_table_rows(result.stdout)[-1]
+    assert growth_row[0] == "growth (n = edges)"
+    assert "~ n (n^1.00)" in growth_row

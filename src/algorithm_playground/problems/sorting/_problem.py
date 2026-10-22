@@ -95,9 +95,13 @@ class SortingProblem(Problem[list[int], list[int], SortingTrace]):
 
     @override
     def describe_output(
-        self, output: list[int], *, limit: int, focus: int | None = None
+        self, output: list[int], *, limit: int, focus: object | None = None
     ) -> str:
-        return describe_sequence(output, limit, focus)
+        return describe_sequence(
+            output,
+            limit,
+            focus if isinstance(focus, int) and not isinstance(focus, bool) else None,
+        )
 
     @override
     def shrink(self, input_data: list[int]) -> Iterator[list[int]]:

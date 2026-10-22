@@ -68,14 +68,26 @@ def _print_fixtures(context: CommandContext, problem: AnyProblem) -> None:
     context.console.print(table)
 
 
+def _describe_dimensions(problem: AnyProblem) -> str | None:
+    """Name the dimensions of a problem when there are several or one starts above zero.
+
+    Returns:
+        The line to print, or ``None`` when the plain ``size`` needs no mention.
+    """
+    dimensions = problem.dimensions
+    if len(dimensions) == 1 and dimensions[0].minimum == 0:
+        return None
+    listing = ", ".join(
+        escape(dimension.name)
+        + (f" (at least {dimension.minimum})" if dimension.minimum else "")
+        for dimension in dimensions
+    )
+    return f"Dimensions: {listing}."
+
+
 def _print_distributions(context: CommandContext, problem: AnyProblem) -> None:
     generators = context.call_hook("generators", lambda: list(problem.generators()))
-    table = Table(
-        title=f"Distributions ({len(generators)})",
-        caption=(
-            f"Sizes start at {problem.minimum_size}." if problem.minimum_size else None
-        ),
-    )
+    table = Table(title=f"Distributions ({len(generators)})")
     table.add_column("name", style="bold")
     table.add_column("description")
     table.add_column("used as")
@@ -96,6 +108,9 @@ def _print_problem(context: CommandContext, problem_name: str) -> None:
     _print_problem_header(context, problem)
     _print_fixtures(context, problem)
     _print_distributions(context, problem)
+    dimensions = _describe_dimensions(problem)
+    if dimensions is not None:
+        context.console.print(dimensions, soft_wrap=True)
     context.console.print(_describe_trace_format(problem), soft_wrap=True)
     context.console.print(_describe_input_files(problem), soft_wrap=True)
 

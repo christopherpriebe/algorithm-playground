@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from algorithm_playground.core import InputGenerator, generate_case
+from algorithm_playground.core import InputGenerator, Size, generate_case
 from algorithm_playground.problems.sorting import (
     I32_MAX,
     I32_MIN,
@@ -21,7 +21,7 @@ SIZES = (0, 1, 2, 3, 4, 5, 10, 33, 100, 257)
 
 def generate_values(name: str, size: int, seed: int = 0) -> list[int]:
     """Generate the input of the named generator for a size and seed."""
-    return generate_case(GENERATORS[name], size=size, seed=seed).input_data
+    return generate_case(GENERATORS[name], size=Size(size=size), seed=seed).input_data
 
 
 def count_inversions(values: list[int]) -> int:

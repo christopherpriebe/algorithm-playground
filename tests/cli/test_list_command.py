@@ -16,6 +16,7 @@ from helpers.support import (
     invoke_cli,
     parse_table_rows,
 )
+from helpers.two_dimensions import register_two_dimension_problem
 
 pytestmark = pytest.mark.integration
 
@@ -61,7 +62,7 @@ ForgetModules = Callable[..., None]
 
 
 MODULE_TEXT = """\
-from algorithm_playground.core import register_problem
+from algorithm_playground.core import Dimension, register_problem
 from algorithm_playground.problems.sorting import SortingProblem
 
 
@@ -193,13 +194,13 @@ def test_the_minimum_size_is_mentioned_when_it_is_not_zero(
     module = tmp_path / "details_minimum_problem.py"
     module.write_text(
         MODULE_TEXT.format(problem_name="needs-two")
-        + "    minimum_size = 2\n    operation_names = ()\n"
+        + '    dimensions = (Dimension("size", minimum=2),)\n    operation_names = ()\n'
     )
 
     result = invoke_cli("list", "needs-two", "--problem-module", str(module))
 
     assert result.exit_code == 0, result.stderr
-    assert "Sizes start at 2." in result.stdout
+    assert "size (at least 2)" in result.stdout
 
 
 @pytest.mark.usefixtures("wide_terminal")
@@ -320,3 +321,15 @@ def test_a_problem_that_cannot_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     text = invoke_cli("list", "sorting").stdout
 
     assert "Input files: the problem does not implement deserialize_input" in text
+
+
+@pytest.mark.usefixtures("wide_terminal")
+def test_several_dimensions_are_listed_with_their_minimums() -> None:
+    """Test the listing of a problem with two dimensions names them and their minimums."""
+    name = register_two_dimension_problem()
+
+    result = invoke_cli("list", name)
+
+    assert result.exit_code == 0, result.stderr
+    assert "vertices (at least 1)" in result.stdout
+    assert "edges" in result.stdout

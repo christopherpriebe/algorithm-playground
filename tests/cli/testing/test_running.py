@@ -290,6 +290,7 @@ def test_case_runs_exactly_the_named_cases(python_sort_executable: Path) -> None
         (["--case", "generated:uniform:size=1_0:seed=1"], "no valid 'size=N' part"),
         (["--case", "generated:uniform:size=5:seed= 1"], "no valid 'seed=N' part"),
         (["--case", "generated:uniform:size=5:seed=001"], "no valid 'seed=N' part"),
+        (["--maximum-size", "vertices=5"], "size=N"),
     ],
 )
 def test_bad_case_options_are_usage_errors(

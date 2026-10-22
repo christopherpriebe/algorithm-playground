@@ -12,8 +12,8 @@ Everything else has a working default: ``expected_output``, ``check_input``,
 ``describe_input`` and ``describe_output``, ``shrink``, ``deserialize_input``,
 ``deserialize_trace`` with ``operation_counts`` and ``trace_warnings``, the
 frames that ``debug`` steps through (``input_output_frame`` and
-``trace_frames``), and the class attributes ``minimum_size``,
-``debug_generator`` and ``operation_names``. The core has helpers for the
+``trace_frames``), and the class attributes ``dimensions``,
+``growth_dimension``, ``debug_generator`` and ``operation_names``. The core has helpers for the
 usual hooks: the binary format readers and writers (such as
 :func:`~algorithm_playground.core.read_i32_array`),
 :func:`~algorithm_playground.core.describe_sequence`, the shrinkers (such as
@@ -32,6 +32,7 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 from algorithm_playground.core._cases import Fixture, InputGenerator, InputT
 from algorithm_playground.core._description import truncate_text
+from algorithm_playground.core._dimensions import Dimension
 from algorithm_playground.core._frames import Frame
 
 __all__ = [
@@ -56,10 +57,10 @@ class VerificationResult:
     Args:
         passed: Whether the output is a valid answer.
         message: Why a run failed.
-        focus: The position in the output where the first problem is, so that
-            failure reports show a window around it instead of the start of a
-            long output (see
-            :func:`~algorithm_playground.core.describe_sequence`).
+        focus: The place in the output where the first problem is, in the
+            problem's own terms (an index, a vertex, an edge, a cell). Failure
+            reports hand it to ``describe_output`` so the description can show
+            that place instead of the start of a long output.
         category: A short name for the kind of wrong answer (``"too short"``,
             ``"unsorted"``). Failures of one category are reported in one
             block, and shrinking keeps a failure of the same category, so give
@@ -74,7 +75,7 @@ class VerificationResult:
     passed: bool
     _: KW_ONLY
     message: str = ""
-    focus: int | None = None
+    focus: object | None = None
     category: str = ""
 
     def __post_init__(self) -> None:
@@ -99,9 +100,16 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
 
     * ``name`` and ``description``: The name that selects the problem on the
       command line, and a one-line description.
-    * ``minimum_size``: The smallest size at which every generator returns a
-      valid input (default ``0``). Startup timing, the generated test cases,
-      the benchmark sizes and the ``debug`` default size all start from it.
+    * ``dimensions``: The numbers that make up the size of an input, as a
+      tuple of :class:`~algorithm_playground.core.Dimension` objects (a graph
+      has ``vertices`` and ``edges``). The default is the one dimension
+      ``size``. Every generator must accept every combination of values at or
+      above the minimums of the dimensions, and may ignore or clamp a
+      dimension it does not need. Startup timing, the generated test cases,
+      the benchmark sizes and the ``debug`` default size all start from the
+      minimums.
+    * ``growth_dimension``: The name of the dimension that the growth row of a
+      benchmark follows (default: the first dimension).
     * ``debug_generator``: The name of the generator that ``debug`` draws its
       input from when the user names none (default: the first generator). Name
       another when the first one makes pictures that are hard to read.
@@ -112,7 +120,8 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
 
     name: ClassVar[str]
     description: ClassVar[str]
-    minimum_size: ClassVar[int] = 0
+    dimensions: ClassVar[tuple[Dimension, ...]] = (Dimension("size"),)
+    growth_dimension: ClassVar[str | None] = None
     debug_generator: ClassVar[str | None] = None
     operation_names: ClassVar[tuple[str, ...]] = ()
 
@@ -158,8 +167,10 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
         """Return the named, seeded input generators.
 
         The first one is the default: ``benchmark`` uses it, and so does the
-        startup timing. Every generator must accept each size from
-        ``minimum_size`` up.
+        startup timing. A generator is called as
+        ``generate(random_generator, **size)``, with one keyword argument per
+        dimension, and must accept every combination of values at or above the
+        minimums of the dimensions.
 
         Returns:
             The generators, each with a unique name.
@@ -230,17 +241,18 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
         output: OutputT,
         *,
         limit: int,
-        focus: int | None = None,  # noqa: ARG002  default hook, signature fixed by its overrides
+        focus: object | None = None,  # noqa: ARG002  default hook, signature fixed by its overrides
     ) -> str:
         """Describe an output for a failure report.
 
-        :func:`~algorithm_playground.core.describe_sequence` shows
-        a window around ``focus``.
+        :func:`~algorithm_playground.core.describe_sequence` shows a window
+        around ``focus`` when it is an index, and an override passes it on only
+        then.
 
         Args:
             output: The output, actual or expected.
             limit: About the most characters the text may have.
-            focus: The position that ``verify`` named in the ``focus`` of its
+            focus: The focus that ``verify`` named in its
                 :class:`~algorithm_playground.core.VerificationResult`, or
                 ``None``. It is passed for the actual output and for the expected
                 one; a hook that cannot use it ignores it.

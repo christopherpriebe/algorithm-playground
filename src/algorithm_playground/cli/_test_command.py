@@ -39,7 +39,6 @@ from algorithm_playground.cli._test_rendering import (
     print_summaries,
 )
 from algorithm_playground.core._cases import (
-    DEFAULT_MAXIMUM_SIZE,
     DEFAULT_RANDOM_CASE_COUNT,
     AnyCase,
     CaseError,
@@ -49,6 +48,7 @@ from algorithm_playground.core._cases import (
     select_generators,
 )
 from algorithm_playground.core._configuration import Configuration
+from algorithm_playground.core._dimensions import build_default_maximum_size
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem
 from algorithm_playground.core._report import convert_correctness_report_to_json
@@ -169,9 +169,9 @@ def _plan_cases(
                 else selection.random_cases
             ),
             maximum_size=(
-                DEFAULT_MAXIMUM_SIZE
+                build_default_maximum_size(problem)
                 if selection.maximum_size is None
-                else selection.maximum_size
+                else context.parse_size(problem, selection.maximum_size)
             ),
             generator_names=tuple(
                 generator.name
@@ -286,7 +286,7 @@ class _CaseSelection:
     """The options that choose which cases to run."""
 
     random_cases: int | None
-    maximum_size: int | None
+    maximum_size: str | None
     seed: int | None
     distributions: tuple[str, ...]
     no_fixtures: bool
@@ -419,13 +419,14 @@ def test_command(  # noqa: PLR0913  every Typer option is a parameter
         ),
     ] = None,
     maximum_size: Annotated[
-        int | None,
+        str | None,
         typer.Option(
             "--maximum-size",
-            min=0,
             help=(
-                "Largest size of a generated case; small sizes are favored "
-                f"(default: {DEFAULT_MAXIMUM_SIZE})."
+                "Largest size of a generated case; small sizes are favored (default: the "
+                "default maximum of each dimension, 100 unless the problem says otherwise). "
+                "A problem with several dimensions takes name=N parts joined by colons "
+                "(for example vertices=50:edges=200)."
             ),
         ),
     ] = None,
@@ -533,7 +534,7 @@ def test_command(  # noqa: PLR0913  every Typer option is a parameter
         build: Whether to run each implementation's build command first.
         inherit_environment: Whether to give implementations the full environment.
         random_cases: The number of generated cases.
-        maximum_size: The largest size of a generated case.
+        maximum_size: The text of the largest size of a generated case.
         seed: The seed of the generated cases.
         distributions: The distributions to draw generated cases from.
         no_fixtures: Whether to skip the problem's fixtures.

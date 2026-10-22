@@ -86,7 +86,7 @@ def _input_weight(outcome: CaseOutcome) -> tuple[int, int]:
         return (0, len(outcome.shrunk.detail.input_text))
     origin = outcome.case.origin
     if isinstance(origin, GeneratedOrigin):
-        return (2, origin.size)
+        return (2, sum(origin.size.values()))
     return (1, len(outcome.detail.input_text) if outcome.detail is not None else 0)
 
 

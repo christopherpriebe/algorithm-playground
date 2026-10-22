@@ -123,7 +123,7 @@ def test_a_failed_implementation_shows_failed_cells_only_where_it_did_not_finish
     assert size_50[1] != "failed"
     assert size_50[2] == "failed"
     assert "flaky.py failed:" in result.stdout
-    assert "Run failed for size 50" in result.stdout
+    assert "Run failed for size=50" in result.stdout
 
 
 def test_a_failed_reference_leaves_the_other_cells_without_ratios(

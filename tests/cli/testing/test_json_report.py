@@ -16,6 +16,7 @@ from helpers.support import (
     invoke_cli,
     replace_command_dependencies,
 )
+from helpers.two_dimensions import add_pair, register_two_dimension_problem
 
 pytestmark = pytest.mark.integration
 
@@ -83,7 +84,7 @@ def test_the_report_records_the_problem_the_settings_and_the_cases(
     report = explicit_cases_run.report
 
     assert report["report"] == "test"
-    assert report["format_version"] == 2
+    assert report["format_version"] == 3
     assert report["problem"] == "sorting"
     assert report["passed"] is False
     assert report["settings"]["cases"] == "explicit"
@@ -94,7 +95,7 @@ def test_the_report_records_the_problem_the_settings_and_the_cases(
             "identifier": LARGE_CASE,
             "kind": "generated",
             "distribution": "uniform",
-            "size": 12,
+            "size": {"size": 12},
             "seed": 5,
         },
     ]
@@ -201,7 +202,7 @@ def test_planned_cases_are_recorded_with_the_settings_that_produced_them(
         "cases": "planned",
         "seed": 3,
         "random_cases": 2,
-        "maximum_size": 6,
+        "maximum_size": {"size": 6},
         "distributions": ["sorted"],
         "include_fixtures": False,
         "shrink": {
@@ -315,3 +316,28 @@ def test_a_failure_while_writing_is_a_usage_error_not_a_traceback(
     assert "Could not write the test report to" in result.stderr
     assert "No space left on device" in result.stderr
     assert "sorter: 1/1 cases passed" in result.stdout
+
+
+def test_a_maximum_size_names_every_dimension(
+    use_fake_test_runners: UseFakeTestRunners, tmp_path: Path
+) -> None:
+    """Test the maximum size of a problem with two dimensions caps each of them."""
+    use_fake_test_runners({"adder": add_pair})
+    name = register_two_dimension_problem()
+    path = tmp_path / "pairs.json"
+
+    result = invoke_cli(
+        *["test", name, "--command", "adder", "--random-cases", "6", "--no-fixtures"],
+        *["--maximum-size", "vertices=3:edges=4", "--json", str(path)],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    report = json.loads(path.read_text())
+    assert report["settings"]["maximum_size"] == {"vertices": 3, "edges": 4}
+    assert report["dimensions"] == [
+        {"name": "vertices", "minimum": 1},
+        {"name": "edges", "minimum": 0},
+    ]
+    sizes = [case["size"] for case in report["cases"]]
+    assert len(sizes) == 6
+    assert all(1 <= size["vertices"] <= 3 and 0 <= size["edges"] <= 4 for size in sizes)
