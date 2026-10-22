@@ -24,6 +24,7 @@ found and :func:`~algorithm_playground.core.validate_problem` for how an author
 checks it.
 """
 
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass
@@ -66,10 +67,16 @@ class VerificationResult:
             block, and shrinking keeps a failure of the same category, so give
             one only when the kinds of failure are few and their names do not
             depend on the input.
+        score: A finite number the problem assigns to the output, in the
+            problem's own units (a tour length, a cover size, a compression
+            ratio). Allowed on a passed and on a failed result; the problem
+            names it with ``score_name``. Always stored as a ``float`` (or
+            ``None``). The harness only reports it and does not know which
+            direction is better.
 
     Raises:
-        ValueError: If a failed verification has no message, or a passed one
-            has a focus or a category.
+        ValueError: If a failed verification has no message, a passed one
+            has a focus or a category, or a score is not a finite number.
     """
 
     passed: bool
@@ -77,6 +84,7 @@ class VerificationResult:
     message: str = ""
     focus: object | None = None
     category: str = ""
+    score: float | None = None
 
     def __post_init__(self) -> None:
         if not self.passed and not self.message:
@@ -85,6 +93,15 @@ class VerificationResult:
         if self.passed and (self.focus is not None or self.category):
             message = "A passed verification cannot have a focus or a category"
             raise ValueError(message)
+        if self.score is not None and (
+            isinstance(self.score, bool)
+            or not isinstance(self.score, int | float)
+            or not math.isfinite(self.score)
+        ):
+            message = f"A score must be a finite number, not {self.score!r}"
+            raise ValueError(message)
+        if self.score is not None:
+            object.__setattr__(self, "score", float(self.score))
 
 
 class Problem(ABC, Generic[InputT, OutputT, TraceT]):
@@ -116,6 +133,10 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
     * ``operation_names``: The keys that ``operation_counts`` returns, so that
       ``list PROBLEM`` can show what a benchmark with ``--count-operations``
       reports.
+    * ``score_name``: What ``verify`` scores (``"tour length"``,
+      ``"inversions"``), shown as the title of the score tables and recorded
+      in reports. ``None`` (the default) means the problem never scores; a
+      problem that names a score must give one for every output it verifies.
     """
 
     name: ClassVar[str]
@@ -124,6 +145,7 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
     growth_dimension: ClassVar[str | None] = None
     debug_generator: ClassVar[str | None] = None
     operation_names: ClassVar[tuple[str, ...]] = ()
+    score_name: ClassVar[str | None] = None
 
     # ---- Binary I/O (required) ----------------------------------------
 
@@ -188,7 +210,9 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
 
         Returns:
             The verdict, with a message and optionally a focus and a category
-            when the output is wrong.
+            when the output is wrong. When the problem declares a
+            ``score_name``, the verdict carries a ``score`` for every output,
+            passed or failed.
         """
 
     # ---- Inputs, failure reports and shrinking (optional) ---------------

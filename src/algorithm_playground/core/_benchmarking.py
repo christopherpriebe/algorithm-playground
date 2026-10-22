@@ -205,7 +205,10 @@ class SizeMeasurement:
     operation names to how often the implementation did them; it is ``None``
     when counting was off or the implementation reported nothing, and
     ``operation_issue`` then says why when there was a reason other than the
-    implementation writing no trace.
+    implementation writing no trace. ``scores`` holds the score that the
+    problem's ``verify`` gave the output of each verified timed repetition, in
+    run order; it is empty when verification was off or the verifier gave no
+    score. The counting run does not contribute.
     """
 
     distribution: str
@@ -215,6 +218,7 @@ class SizeMeasurement:
     summary: TimingSummary
     operation_counts: Mapping[str, int] | None = None
     operation_issue: OperationIssue | None = None
+    scores: tuple[float, ...] = ()
 
 
 class FailureStage(Enum):
@@ -460,13 +464,17 @@ class ImplementationBenchmark:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkReport:
-    """The result of benchmarking several implementations of one problem."""
+    """The result of benchmarking several implementations of one problem.
+
+    ``score_name`` is what the problem's ``verify`` scores, or ``None``.
+    """
 
     problem_name: str
     settings: BenchmarkSettings
     implementations: tuple[ImplementationBenchmark, ...]
     dimensions: tuple[Dimension, ...] = (Dimension("size"),)
     growth_dimension: str = "size"
+    score_name: str | None = None
 
     @property
     def has_passed(self) -> bool:
@@ -558,12 +566,16 @@ class _Benchmark:
             ),
             dimensions=tuple(self._problem.dimensions),
             growth_dimension=growth_dimension,
+            score_name=self._problem.score_name,
         )
 
     def _measure_point(
         self, case: AnyCase, distribution: str, size: Size
     ) -> tuple[
-        dict[str, list[float]], dict[str, Mapping[str, int]], dict[str, OperationIssue]
+        dict[str, list[float]],
+        dict[str, Mapping[str, int]],
+        dict[str, OperationIssue],
+        dict[str, list[float]],
     ]:
         """Time every active implementation on ``case``; with counting on, also count operations.
 
@@ -574,19 +586,20 @@ class _Benchmark:
 
         Returns:
             The wall-time samples of the implementations that completed every
-            run, the operation counts of those that reported some, and the
-            issues of those that could not.
+            run, the operation counts of those that reported some, the
+            issues of those that could not, and the scores of the verified
+            repetitions of each implementation.
         """
         point = _MeasurementPoint(f"{size} ({distribution})", size, distribution)
-        samples = self._measure(case.input_data, point)
+        samples, scores = self._measure(case.input_data, point)
         if not self._settings.count_operations:
-            return samples, {}, {}
+            return samples, {}, {}, scores
         counts, issues = self._count_operations(list(samples), case.input_data, point)
-        return samples, counts, issues
+        return samples, counts, issues, scores
 
     def _measure(
         self, input_data: object, point: _MeasurementPoint
-    ) -> dict[str, list[float]]:
+    ) -> tuple[dict[str, list[float]], dict[str, list[float]]]:
         """Time the active implementations on one input, round-robin.
 
         The implementations that fail are recorded in ``failures`` and left out
@@ -597,23 +610,29 @@ class _Benchmark:
             point: Where the runs belong.
 
         Returns:
-            The wall-time samples of the implementations that completed every run.
+            The wall-time samples of the implementations that completed every
+            run, and the scores of the verified timed repetitions of each
+            implementation that took part.
         """
         distribution = point.distribution
         samples: dict[str, list[float]] = {
             name: [] for name in self._active_names(distribution=distribution)
         }
+        scores: dict[str, list[float]] = {name: [] for name in samples}
         for _ in range(self._settings.warmup):
             for name in self._active_names(samples, distribution=distribution):
                 self._execute(name, input_data, point, phase=point.warmup_phase)
         for _ in range(self._settings.repetitions):
             for name in self._active_names(samples, distribution=distribution):
-                self._record_sample(name, input_data, point, samples=samples)
-        return {
+                self._record_sample(
+                    name, input_data, point, samples=samples, scores=scores
+                )
+        completed = {
             name: values
             for name, values in samples.items()
             if not self._is_stopped(name, distribution)
         }
+        return completed, scores
 
     def _fail_distribution(self, distribution: str, message: str) -> None:
         """Record that the problem could not generate the inputs of ``distribution``.
@@ -646,7 +665,7 @@ class _Benchmark:
             name: summarize(samples)
             for name, samples in self._measure(
                 input_data, _MeasurementPoint("startup")
-            ).items()
+            )[0].items()
         }
 
     def _measure_distribution(
@@ -687,7 +706,7 @@ class _Benchmark:
         distribution: str,
         size: Size,
     ) -> Iterator[tuple[str, SizeMeasurement]]:
-        samples, counts, issues = self._measure_point(case, distribution, size)
+        samples, counts, issues, scores = self._measure_point(case, distribution, size)
         for name, raw_samples in samples.items():
             reported_samples = (
                 subtract_startup(raw_samples, startups[name].mean)
@@ -704,6 +723,7 @@ class _Benchmark:
                     summary=summarize(reported_samples),
                     operation_counts=counts.get(name),
                     operation_issue=issues.get(name),
+                    scores=tuple(scores.get(name, ())),
                 ),
             )
 
@@ -763,23 +783,43 @@ class _Benchmark:
         point: _MeasurementPoint,
         *,
         samples: dict[str, list[float]],
+        scores: dict[str, list[float]],
     ) -> None:
         """Run one implementation once and keep its wall time when the run is good.
 
         The sample is kept only when the run succeeded and, if outputs are
-        verified, its output verified.
+        verified, its output verified; the score of a verified output is kept
+        in ``scores``.
         """
         result = self._execute(name, input_data, point, phase=point.measurement_phase)
         if result is None:
             return
         if self._settings.verify_outputs:
-            message = self._verification_failure(input_data, result.output)
+            message, score = self._verify(input_data, result.output)
             if message is not None:
                 self._fail(
                     name, f"Verification failed for {point.label}: {message}", point
                 )
                 return
+            if score is not None:
+                scores[name].append(score)
         samples[name].append(result.wall_seconds)
+
+    def _verify(
+        self, input_data: object, output: object
+    ) -> tuple[str | None, float | None]:
+        """Verify ``output``.
+
+        Returns:
+            Why ``output`` was rejected, or ``None`` when it passed, and the
+            score the verifier gave, if any.
+        """
+        try:
+            verification = self._problem.verify(input_data, output)
+        except Exception as error:  # noqa: BLE001  the verify hook is problem code
+            return f"verification raised {describe_error(error)}", None
+        message = None if verification.passed else verification.message
+        return message, verification.score
 
     def _verification_failure(self, input_data: object, output: object) -> str | None:
         """Verify ``output``.
@@ -787,11 +827,7 @@ class _Benchmark:
         Returns:
             Why ``output`` was rejected, or ``None`` when it passed.
         """
-        try:
-            verification = self._problem.verify(input_data, output)
-        except Exception as error:  # noqa: BLE001  the verify hook is problem code
-            return f"verification raised {describe_error(error)}"
-        return None if verification.passed else verification.message
+        return self._verify(input_data, output)[0]
 
     def _count_operations(
         self, names: list[str], input_data: object, point: _MeasurementPoint

@@ -8,7 +8,8 @@ valid). It checks that:
   non-empty tuple of uniquely named :class:`~algorithm_playground.core.Dimension`
   objects, a ``growth_dimension`` that names one of them (or ``None``), a
   ``debug_generator`` that names one of its generators (or ``None``), and
-  ``operation_names`` that are unique text;
+  ``operation_names`` that are unique text, and a ``score_name`` that is
+  non-empty text (or ``None``);
 * fixtures exist, have unique names, are accepted by ``check_input`` and
   serialize;
 * generators exist, have unique names, return the same input for the same
@@ -17,7 +18,8 @@ valid). It checks that:
 * ``deserialize_input``, when a problem provides it, reads back the input that
   ``serialize_input`` wrote;
 * ``expected_output``, when a problem provides it, passes ``verify`` and can
-  be drawn by ``input_output_frame`` (for the first few inputs);
+  be drawn by ``input_output_frame`` (for the first few inputs), and ``verify``
+  scores it if and only if the problem declares a ``score_name``;
 * ``shrink`` candidates that ``check_input`` accepts serialize and differ from
   their input, and the describe hooks return text.
 
@@ -124,6 +126,7 @@ class _Validator:
         generators = self._generators()
         self._check_debug_generator(generators)
         self._check_operation_names()
+        self._check_score_name()
         if dimensions is not None:
             for generator in generators:
                 samples.extend(self._generated_samples(generator, dimensions))
@@ -190,6 +193,13 @@ class _Validator:
             self._record(
                 "the class attribute 'operation_names' must be a tuple of unique non-empty text, "
                 f"got {names!r}"
+            )
+
+    def _check_score_name(self) -> None:
+        name = getattr(type(self._problem), "score_name", None)
+        if name is not None and (not isinstance(name, str) or not name):
+            self._record(
+                f"the class attribute 'score_name' must be non-empty text or None, got {name!r}"
             )
 
     def _record(self, message: str) -> None:
@@ -359,11 +369,27 @@ class _Validator:
                     f"verify() rejects expected_output() for {subject}: "
                     f"{verification.message or '(no message)'}"
                 )
+            if succeeded and verification is not None:
+                self._check_score(subject, verification.score)
             self._check_input_output_frame(subject, input_data, expected)
         for hook, describe in descriptions:
             succeeded, text = self._attempt(f"{hook}() raised for {subject}", describe)
             if succeeded and not isinstance(text, str):
                 self._record(f"{hook}() must return text, got {type(text).__name__}")
+
+    def _check_score(self, subject: str, score: float | None) -> None:
+        name = getattr(type(self._problem), "score_name", None)
+        declared = isinstance(name, str) and bool(name)
+        if score is not None and not declared:
+            self._record(
+                f"verify() returned a score for {subject}, "
+                "but the problem declares no score_name"
+            )
+        elif score is None and declared:
+            self._record(
+                f"verify() returned no score for {subject}, "
+                f"but the problem declares the score {name!r}"
+            )
 
     def _check_input_output_frame(
         self, subject: str, input_data: object, expected: object

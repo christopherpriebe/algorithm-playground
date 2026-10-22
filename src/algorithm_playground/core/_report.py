@@ -14,6 +14,13 @@ The test report records the largest size it generated in ``maximum_size``:
 the one asked for, else the default maximum of every dimension. It lists the cases and, for every implementation, each outcome
 with the failure details, the shrunk input and where the inputs were saved when
 there are any.
+When the problem scores outputs, both reports name the score in a top-level
+``score_name`` (``null`` otherwise). In the test report every outcome has a
+``score`` (``null`` without one) and every implementation's ``summary`` counts
+the ``scored`` outcomes and gives their ``mean_score`` (``null`` when there
+are none). In the benchmark report every result has a ``scores`` list, the
+scores of its verified timed repetitions in run order (empty when there are
+none).
 """
 
 import datetime as dt
@@ -54,8 +61,8 @@ __all__ = [
 
 _READ_CHUNK_BYTES = 64 * 1024
 
-BENCHMARK_FORMAT_VERSION = 7
-TEST_FORMAT_VERSION = 3
+BENCHMARK_FORMAT_VERSION = 8
+TEST_FORMAT_VERSION = 4
 
 # A JSON document: the objects of a report mix text, numbers, booleans, lists and nested objects.
 JsonObject = dict[str, Any]
@@ -163,6 +170,7 @@ def _outcome_record(outcome: CaseOutcome, saved: SavedInputs) -> JsonObject:
         "saved_input": _path_or_none(saved.inputs.get(key)),
         "saved_shrunk_input": _path_or_none(saved.shrunk_inputs.get(key)),
         "shrink_note": outcome.shrink_note,
+        "score": outcome.score,
         "shrunk": (
             None
             if shrunk is None
@@ -179,6 +187,7 @@ def _tested_implementation_record(
     report: TestReport, name: str, saved: SavedInputs
 ) -> JsonObject:
     outcomes = report.outcomes_for(name)
+    scores = [outcome.score for outcome in outcomes if outcome.score is not None]
     return {
         "build_failure": None,
         "cannot_run": None,
@@ -186,6 +195,8 @@ def _tested_implementation_record(
             "passed": sum(outcome.status is CaseStatus.PASSED for outcome in outcomes),
             "failed": sum(outcome.status is CaseStatus.FAILED for outcome in outcomes),
             "errors": sum(outcome.status is CaseStatus.ERROR for outcome in outcomes),
+            "scored": len(scores),
+            "mean_score": sum(scores) / len(scores) if scores else None,
         },
         "outcomes": [_outcome_record(outcome, saved) for outcome in outcomes],
     }
@@ -246,7 +257,13 @@ def _implementation_test_record(
         record.update(
             build_failure=build_failures.get(name),
             cannot_run=unrunnable.get(name),
-            summary={"passed": 0, "failed": 0, "errors": 0},
+            summary={
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "scored": 0,
+                "mean_score": None,
+            },
             outcomes=[],
         )
     else:
@@ -314,6 +331,7 @@ def _measurement_record(measurement: SizeMeasurement) -> JsonObject:
                 "message": measurement.operation_issue.message,
             }
         ),
+        "scores": list(measurement.scores),
         **_summary_fields(measurement.summary),
         "raw_samples_seconds": list(measurement.raw_samples),
     }
@@ -386,6 +404,7 @@ def convert_benchmark_report_to_json(report: BenchmarkReport) -> JsonObject:
         },
         "dimensions": _dimensions_record(report.dimensions),
         "growth_dimension": report.growth_dimension,
+        "score_name": report.score_name,
         "implementations": [
             _implementation_record(benchmark, settings.distributions)
             for benchmark in report.implementations
@@ -432,6 +451,7 @@ def convert_correctness_report_to_json(  # noqa: PLR0913  one keyword-only optio
         "passed": report.has_passed and not failed_builds and not cannot_run,
         "settings": _test_settings_record(report, plan),
         "dimensions": _dimensions_record(report.dimensions),
+        "score_name": report.score_name,
         "cases": [_case_record(case) for case in report.cases],
         "implementations": [
             _implementation_test_record(

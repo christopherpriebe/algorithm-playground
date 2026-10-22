@@ -33,6 +33,7 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.scoring import NearSortingProblem, count_inversions, keep_as_is
 from helpers.sizes import build_sizes
 from helpers.two_dimensions import TwoDimensionProblem, add_pair
 
@@ -765,3 +766,52 @@ def test_sizes_are_measured_in_the_declared_order_of_their_dimensions() -> None:
     assert measurement.case_identifier == "generated:exact:vertices=2:edges=3:seed=1"
     assert str(measurement.size) == "vertices=2:edges=3"
     assert str(report.settings.sizes[0]) == "vertices=2:edges=3"
+
+
+def test_scores_are_recorded_per_verified_repetition() -> None:
+    """Test a measurement holds the score of every verified repetition, in run order."""
+    problem = NearSortingProblem()
+    report, runners, _ = run_fake_benchmark(
+        {"lazy": keep_as_is}, problem=problem, sizes=build_sizes(4), repetitions=3
+    )
+
+    (measurement,) = report.implementations[0].measurements
+    # The startup input runs once per repetition; the sized input comes last.
+    inversions = float(count_inversions(runners.collect_inputs_of("lazy")[-1]))
+    assert measurement.scores == (inversions, inversions, inversions)
+    assert report.score_name == "inversions"
+
+
+def test_no_scores_are_recorded_when_verification_is_off() -> None:
+    """Test a run without verification has no scores, since the verifier never sees it."""
+    report, _, _ = run_fake_benchmark(
+        {"lazy": keep_as_is},
+        problem=NearSortingProblem(),
+        sizes=build_sizes(4),
+        verify_outputs=False,
+    )
+
+    assert report.implementations[0].measurements[0].scores == ()
+
+
+def test_measurements_of_an_unscored_problem_have_no_scores() -> None:
+    """Test the sorting problem, which scores nothing, leaves the scores and the name empty."""
+    report, _, _ = run_fake_benchmark({"a": sort_correctly}, sizes=build_sizes(4))
+
+    assert report.implementations[0].measurements[0].scores == ()
+    assert report.score_name is None
+
+
+def test_the_warmup_and_counting_runs_add_no_score() -> None:
+    """Test only the timed repetitions score: the warmup and the counting run add nothing."""
+    report, _, _ = run_fake_benchmark(
+        {"lazy": keep_as_is},
+        problem=NearSortingProblem(),
+        sizes=build_sizes(4),
+        repetitions=2,
+        warmup=1,
+        count_operations=True,
+    )
+
+    (measurement,) = report.implementations[0].measurements
+    assert len(measurement.scores) == 2

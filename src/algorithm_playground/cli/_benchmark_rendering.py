@@ -6,7 +6,9 @@ each one has a header row in the tables; with one, a line under the table names
 it. The times of a table share one unit, named in its header. The growth row
 gives the best-fitting class and the fitted exponent (``~ n log n (n^1.21)``),
 with a star when the times are too close to the startup time to tell. Operation
-counts have a table per operation, with a column per implementation. A cell of
+counts have a table per operation, with a column per implementation, and so
+do the scores that the problem's verifier gave (the median per size, titled
+with the score name). A cell of
 an implementation that failed says ``failed``, and the cells it never reached
 because of that failure say ``skipped``; when the problem's generator for a
 distribution raised, the unmeasured cells of that distribution say ``failed``
@@ -23,7 +25,11 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from algorithm_playground.cli._rendering import format_size, print_table
+from algorithm_playground.cli._rendering import (
+    format_score,
+    format_size,
+    print_table,
+)
 from algorithm_playground.core._benchmarking import (
     BenchmarkReport,
     CellStatus,
@@ -43,6 +49,7 @@ __all__ = [
     "print_footer",
     "print_operation_issues",
     "print_operation_tables",
+    "print_score_table",
     "print_single_table",
 ]
 
@@ -258,7 +265,51 @@ def _operation_cell(
     return "-" if count is None else f"{count:,}"
 
 
+def _score_cell(
+    benchmark: ImplementationBenchmark, distribution: str, size: Size
+) -> str:
+    """Format the median score of one measurement, or say why there is none.
+
+    Returns:
+        The markup of the cell.
+    """
+    measurement = benchmark.measurement_at(distribution, size)
+    if measurement is None:
+        status = benchmark.status_at(distribution, size)
+        return FAILED_CELL if status is CellStatus.FAILED else SKIPPED_CELL
+    if not measurement.scores:
+        return NOT_REPORTED_CELL
+    return format_score(median(measurement.scores))
+
+
 def _build_operation_table(report: BenchmarkReport, operation: str) -> Table:
+    return _build_size_table(
+        report,
+        lambda benchmark, distribution, size: _operation_cell(
+            benchmark, distribution, size, operation=operation
+        ),
+        growth_of=lambda benchmark, distribution: benchmark.operation_growth(
+            distribution
+        ).get(operation),
+    )
+
+
+def _build_size_table(
+    report: BenchmarkReport,
+    cell: Callable[[ImplementationBenchmark, str, Size], str],
+    *,
+    growth_of: Callable[[ImplementationBenchmark, str], Growth | None] | None = None,
+) -> Table:
+    """Build a table with a row per size and a column per implementation.
+
+    Args:
+        report: The benchmark report.
+        cell: Formats the cell of an implementation at a distribution and size.
+        growth_of: Gives the growth for the growth row; without it there is none.
+
+    Returns:
+        The table.
+    """
     table = Table()
     table.add_column("size", justify="right", no_wrap=True)
     for benchmark in report.implementations:
@@ -269,13 +320,14 @@ def _build_operation_table(report: BenchmarkReport, operation: str) -> Table:
             table.add_row(
                 format_size(size),
                 *(
-                    _operation_cell(benchmark, distribution, size, operation=operation)
+                    cell(benchmark, distribution, size)
                     for benchmark in report.implementations
                 ),
             )
+        if growth_of is None:
+            continue
         growths = [
-            benchmark.operation_growth(distribution).get(operation)
-            for benchmark in report.implementations
+            growth_of(benchmark, distribution) for benchmark in report.implementations
         ]
         if any(growth is not None for growth in growths):
             table.add_row(
@@ -517,6 +569,31 @@ def print_operation_tables(console: Console, report: BenchmarkReport) -> None:
     console.print(
         "Counted in one extra untimed run per implementation, distribution and size with a "
         "trace file; the growth row is the fitted growth of the count with the size."
+    )
+
+
+def print_score_table(console: Console, report: BenchmarkReport) -> None:
+    """Print the median score of each implementation per size, when the problem scored.
+
+    Nothing is printed without a score name or when no measurement has scores.
+
+    Args:
+        console: The console to print on.
+        report: The benchmark report.
+    """
+    if report.score_name is None or not any(
+        measurement.scores
+        for benchmark in report.implementations
+        for measurement in benchmark.measurements
+    ):
+        return
+    print_table(
+        console,
+        f"{report.score_name} — {report.problem_name}",
+        _build_size_table(report, _score_cell),
+    )
+    console.print(
+        "Median score of the verified timed runs; the problem decides which direction is better."
     )
 
 

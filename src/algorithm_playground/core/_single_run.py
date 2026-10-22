@@ -66,7 +66,12 @@ def _judge(
             result=result,
         )
     if verification.passed:
-        return SingleRun(status=CaseStatus.PASSED, message="", result=result)
+        return SingleRun(
+            status=CaseStatus.PASSED,
+            message="",
+            result=result,
+            score=verification.score,
+        )
     message = verification.message
     if result.temporary_directory is not None:
         message += f"\nTemporary files were kept in {result.temporary_directory}"
@@ -76,6 +81,7 @@ def _judge(
         category=verification.category or WRONG_OUTPUT_CATEGORY,
         result=result,
         focus=verification.focus,
+        score=verification.score,
     )
 
 
@@ -100,7 +106,8 @@ class SingleRun:
     ``message`` is empty for a pass. ``focus`` is the place in the output
     where the problem's ``verify`` found the first problem, when it said (see
     :class:`~algorithm_playground.core.VerificationResult`). ``result``
-    is ``None`` when the run produced no output.
+    is ``None`` when the run produced no output. ``score`` is the score that
+    ``verify`` gave a passed or a failed output, or ``None``.
     """
 
     status: CaseStatus
@@ -108,6 +115,7 @@ class SingleRun:
     category: str = ""
     result: RunResult[object, object] | None = None
     focus: object | None = None
+    score: float | None = None
 
     @property
     def has_output(self) -> bool:

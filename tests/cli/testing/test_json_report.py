@@ -84,7 +84,7 @@ def test_the_report_records_the_problem_the_settings_and_the_cases(
     report = explicit_cases_run.report
 
     assert report["report"] == "test"
-    assert report["format_version"] == 3
+    assert report["format_version"] == 4
     assert report["problem"] == "sorting"
     assert report["passed"] is False
     assert report["settings"]["cases"] == "explicit"
@@ -110,8 +110,20 @@ def test_the_report_summarizes_each_implementation(
     assert good["name"] == "python_sort.py"
     assert good["command"] == [str(python_sort_executable.resolve())]
     assert good["files"][0]["path"] == str(python_sort_executable.resolve())
-    assert good["summary"] == {"passed": 2, "failed": 0, "errors": 0}
-    assert bad["summary"] == {"passed": 1, "failed": 1, "errors": 0}
+    assert good["summary"] == {
+        "passed": 2,
+        "failed": 0,
+        "errors": 0,
+        "scored": 0,
+        "mean_score": None,
+    }
+    assert bad["summary"] == {
+        "passed": 1,
+        "failed": 1,
+        "errors": 0,
+        "scored": 0,
+        "mean_score": None,
+    }
 
 
 def test_the_report_lists_the_outcome_of_every_case_with_the_failure_details(

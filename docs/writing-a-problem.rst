@@ -236,5 +236,11 @@ Where to go next
   values from the minimums up, and the startup measurement, the generated test
   sizes and ``debug`` start from the minimums. ``Dimension`` comes from
   ``algorithm_playground.authoring`` like the rest.
+* Attach a quality score to an output when "correct" is not the whole story
+  (a tour length, a cover size, the inversions a heuristic leaves): give
+  ``VerificationResult`` a ``score`` and set ``score_name`` on the problem.
+  ``test`` then reports the mean score per implementation and ``benchmark`` a
+  table of median scores per size. The harness does not know which direction is
+  better; the name should make that clear to a reader.
 * Set ``debug_generator`` to the name of the generator whose inputs make the
   best pictures, and ``operation_names`` to the operations your trace counts.

@@ -466,7 +466,7 @@ def test_the_json_report_carries_counts_and_their_growth(
 
     assert result.exit_code == 0, result.stdout
     report = json.loads(path.read_text())
-    assert report["format_version"] == 7
+    assert report["format_version"] == 8
     assert report["settings"]["count_operations"] is True
     insertion, silent = report["implementations"]
     assert insertion["results"][0]["operation_counts"] == {

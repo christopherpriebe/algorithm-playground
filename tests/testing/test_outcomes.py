@@ -32,6 +32,12 @@ from helpers.fakes import (
     drop_last_above_five,
     sort_correctly,
 )
+from helpers.scoring import (
+    NearSortingProblem,
+    count_inversions,
+    drop_last_keeping_order,
+    keep_as_is,
+)
 
 LARGE_GENERATED = "generated:uniform:size=12:seed=5"
 
@@ -596,3 +602,51 @@ def test_case_identifiers_follow_the_cases(sample_report: TestReport) -> None:
 def test_pytest_does_not_collect_the_report_class() -> None:
     """Test the report class is marked so that pytest does not collect it as a test class."""
     assert TestReport.__test__ is False
+
+
+def test_the_score_of_a_verification_is_recorded_on_the_outcome() -> None:
+    """Test each outcome carries the score its verification gave, and the report the name."""
+    problem = NearSortingProblem()
+
+    report = run_tests(
+        problem,
+        build_named_implementations("exact", "lazy"),
+        [resolve_case(problem, "fixture:two_unsorted")],
+        runner_factory=FakeRunners({"exact": sort_correctly, "lazy": keep_as_is}),
+    )
+
+    exact, lazy = report.outcomes
+    assert (exact.status, exact.score) == (CaseStatus.PASSED, 0.0)
+    assert (lazy.status, lazy.score) == (CaseStatus.PASSED, 1.0)
+    assert report.score_name == "inversions"
+
+
+def test_a_failed_verification_keeps_its_score() -> None:
+    """Test a failed outcome keeps the score the verifier attached to the failure."""
+    problem = NearSortingProblem()
+
+    case = resolve_case(problem, LARGE_GENERATED)
+
+    report = run_tests(
+        problem,
+        build_named_implementations("bad"),
+        [case],
+        options=TestRunOptions(shrinking=None),
+        runner_factory=FakeRunners({"bad": drop_last_keeping_order}),
+    )
+
+    (outcome,) = report.outcomes
+    assert outcome.status is CaseStatus.FAILED
+    assert outcome.score is not None
+    assert outcome.score == float(count_inversions(case.input_data[:-1]))
+    assert outcome.score > 0
+
+
+def test_an_outcome_of_an_unscored_problem_has_no_score() -> None:
+    """Test the sorting problem, which scores nothing, leaves the score and the name empty."""
+    report, _ = run_with_fake_runners(
+        {"sorter": sort_correctly}, ["fixture:two_unsorted"]
+    )
+
+    assert report.outcomes[0].score is None
+    assert report.score_name is None

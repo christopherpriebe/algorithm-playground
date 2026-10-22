@@ -83,7 +83,12 @@ Required members:
    output. ``category`` is a short name for the kind of wrong answer
    (``"too short"``, ``"not sorted"``): failures of one category are reported in
    one block, and shrinking keeps a failure of the same category, so give one only
-   when the kinds are few and their names do not depend on the input.
+   when the kinds are few and their names do not depend on the input. ``score``
+   is a finite number that the problem assigns to the output, in its own units (a
+   tour length, a cover size, a compression ratio, the inversions a heuristic
+   sort leaves); it is allowed on a pass and on a failure, and the problem must
+   name it with ``score_name``. The harness only reports scores and does not know
+   which direction is better.
 
 Optional class attributes, each with a working default:
 
@@ -129,6 +134,16 @@ Optional class attributes, each with a working default:
    The names ``operation_counts`` returns, in the order a table should list them.
    ``algorithm-playground list PROBLEM`` shows them, so a user knows what
    ``benchmark --count-operations`` counts before running it.
+
+``score_name`` (default ``None``)
+   What ``verify`` scores (``"tour length"``, ``"inversions"``). It titles the
+   score table of ``benchmark`` (a whole number is shown without decimals, any
+   other value with two decimals), appears in the summary of ``test`` and in
+   ``list PROBLEM``, and is recorded in the JSON reports. With a name, ``verify``
+   must give a score for every output it verifies; without one it must give
+   none. :func:`~algorithm_playground.core.validate_problem` reports a
+   mismatch and, when the problem provides ``expected_output``, checks the
+   score against the expected outputs.
 
 Optional methods, each with a working default:
 

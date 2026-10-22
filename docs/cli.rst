@@ -165,6 +165,8 @@ With a problem name, ``list`` shows what that problem offers instead:
 * whether it has a **trace format** (``debug`` and ``benchmark
   --count-operations`` need one) and, when it says, the **operations** that a
   benchmark counts from a trace;
+* its **score** (``Score: inversions.`` or ``Score: none.``), what the
+  problem's ``verify`` scores;
 * whether it can read its input files, which ``debug --input-file`` needs;
 * the configured implementations for that problem.
 
@@ -260,6 +262,9 @@ cases are summarized by distribution, one row each, showing how many passed:
    unsorted.py: 22 of 32 cases did not pass
    ...
    drops_last.py: 13/32 cases passed (11/24 fixtures, 2/8 generated)
+
+For a problem that scores outputs the line ends with the mean score over the
+scored cases (``; mean inversions 23 over 2 scored cases``).
 
 **Failure details.** Below the matrix, the failures of each implementation are
 described under its name. For each failing case the report gives the case
@@ -428,7 +433,9 @@ Other options:
    directory, a parent that is a file, or a directory without write permission is
    a usage error with exit code ``2``), and so is a failure while writing the
    file. ``report`` says what kind of report it is and ``format_version`` changes
-   whenever a key is renamed, removed, or reinterpreted (currently ``3``; version
+   whenever a key is renamed, removed, or reinterpreted (currently ``4``; version
+   4 added ``score_name``, the ``score`` of every outcome, and ``scored`` and
+   ``mean_score`` in every ``summary``; version
    3 added ``dimensions`` and turned every size, and ``settings.maximum_size``,
    into an object with one integer per dimension; version
    2 added ``report``, ``settings``, and the ``command``, ``files``,
@@ -442,7 +449,7 @@ Other options:
 
       {
         "report": "test",
-        "format_version": 3,
+        "format_version": 4,
         "problem": "sorting",
         "passed": false,
         "settings": {
@@ -456,6 +463,7 @@ Other options:
           "timeout_seconds"
         },
         "dimensions": [{"name": "size", "minimum": 0}],
+        "score_name": null or what the problem's verify scores,
         "cases": [
           {"identifier": "fixture:empty", "kind": "fixture", "fixture"},
           {"identifier": "generated:uniform:size=12:seed=5", "kind": "generated",
@@ -467,7 +475,8 @@ Other options:
            "files": [{"path", "sha256"}],
            "build_failure": null or the build output,
            "cannot_run": null or why the command cannot be started,
-           "summary": {"passed", "failed", "errors"},
+           "summary": {"passed", "failed", "errors", "scored",
+                       "mean_score" (null without scored outcomes)},
            "outcomes": [
              {"case": the identifier, "status": "passed" | "failed" | "error",
               "category" (for example "not sorted" or "timeout"; "" for a pass),
@@ -477,6 +486,7 @@ Other options:
                              --save-failing-inputs,
               "saved_shrunk_input": null or the path of the shrunk input,
               "shrink_note": null or why shrinking did not do its job or finish,
+              "score": null or the score verify gave the output,
               "shrunk": null or {"case", "message", "input", "expected", "actual"}}
            ]}
         ],
@@ -597,6 +607,14 @@ runs and 10 percent of the startup median, the series is mostly process startup,
 and the fitted growth says little about the algorithm. The note under the table
 then asks for larger sizes. The JSON report has the same verdict as ``reliable``.
 Counts of operations are exact and are never marked.
+
+**Scores.** A problem whose ``verify`` scores outputs (see ``score_name`` in
+:doc:`extending`) gets one more table after the timing table, titled with the
+score name (``inversions — near-sorting``): one row per size, one column per
+implementation holding the median score of its verified timed runs, and
+``not reported`` where an implementation has none. A whole number is shown
+without decimals, any other value with two decimals. There is no growth row. The
+benchmark does not know whether a lower or a higher score is better.
 
 **Operation counts.** With ``--count-operations`` the benchmark also reports
 how many operations each implementation performed, which unlike a wall time is
@@ -761,8 +779,9 @@ escape codes.
    ``raw_samples_seconds`` holds the unadjusted wall times in the order the runs
    happened. Results are listed distribution by distribution, in the order of
    ``settings.distributions``, and by size within each. ``format_version``
-   changes whenever a key is renamed, removed, or reinterpreted (currently ``7``;
-   version 7 added ``dimensions`` and ``growth_dimension`` and turned every size
+   changes whenever a key is renamed, removed, or reinterpreted (currently ``8``;
+   version 8 added ``score_name`` and the ``scores`` of every result; version 7
+   added ``dimensions`` and ``growth_dimension`` and turned every size
    (``settings.sizes``, the ``size`` of results and failures) into an object with
    one integer per dimension; version 2 renamed ``case_name`` to ``case_identifier`` and added
    ``distribution`` and ``settings.distributions``; version 3 added
@@ -780,7 +799,7 @@ escape codes.
 
       {
         "report": "benchmark",
-        "format_version": 7,
+        "format_version": 8,
         "problem": "sorting",
         "settings": {"seed", "sizes": [{"size": 1000}, ...], "repetitions", "warmup",
                      "timeout_seconds", "verify_outputs",
@@ -788,6 +807,7 @@ escape codes.
                      "distributions": ["uniform", ...]},
         "dimensions": [{"name": "size", "minimum": 0}],
         "growth_dimension": "size",
+        "score_name": null or what the problem's verify scores,
         "implementations": [
           {"name", "command", "working_directory",
            "inherit_environment", "timeout_seconds" (null: the default),
@@ -804,6 +824,8 @@ escape codes.
                         "operation_counts": null or {"compares", "swaps",
                                                      "writes"},
                         "operation_issue": null or {"kind", "message"},
+                        "scores": [the scores of the verified timed runs,
+                                   in run order; empty without scores],
                         "samples_seconds", "raw_samples_seconds",
                         "minimum_seconds", "median_seconds", "mean_seconds",
                         "standard_deviation_seconds"}],

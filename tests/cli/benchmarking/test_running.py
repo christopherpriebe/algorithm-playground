@@ -394,7 +394,7 @@ def test_a_generator_that_raises_is_recorded_as_a_distribution_failure_in_the_js
     """Test the report records the broken distribution as a failure of every implementation."""
     report = broken_distribution_run.report
 
-    assert report["format_version"] == 7
+    assert report["format_version"] == 8
     for implementation in report["implementations"]:
         (failure,) = implementation["failures"]
         assert (failure["stage"], failure["distribution"], failure["size"]) == (

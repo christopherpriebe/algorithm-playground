@@ -178,7 +178,8 @@ class CaseOutcome:
     ``shrink_note`` says why shrinking did not do its job or did not finish,
     for example that the problem's ``shrink`` hook raised or that its budget
     ran out; it is ``None`` otherwise. ``category`` says what kind of failure it
-    was (see :class:`~algorithm_playground.core.SingleRun`).
+    was (see :class:`~algorithm_playground.core.SingleRun`). ``score`` is the
+    score that ``verify`` gave the output, or ``None``.
     """
 
     case: AnyCase
@@ -189,6 +190,7 @@ class CaseOutcome:
     shrunk: ShrunkFailure | None = None
     shrink_note: str | None = None
     category: str = ""
+    score: float | None = None
 
     @property
     def case_identifier(self) -> str:
@@ -259,7 +261,10 @@ class TestSettings:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TestReport:
-    """All outcomes of a test run, one per case and implementation."""
+    """All outcomes of a test run, one per case and implementation.
+
+    ``score_name`` is what the problem's ``verify`` scores, or ``None``.
+    """
 
     __test__: ClassVar[bool] = False  # Tell pytest not to collect this as a test class.
 
@@ -269,6 +274,7 @@ class TestReport:
     outcomes: tuple[CaseOutcome, ...]
     settings: TestSettings = field(default_factory=TestSettings)
     dimensions: tuple[Dimension, ...] = (Dimension("size"),)
+    score_name: str | None = None
     _index: dict[tuple[str, str], CaseOutcome] = field(
         init=False, repr=False, compare=False, default_factory=dict
     )
@@ -640,6 +646,7 @@ class _TestRun:
             shrunk=shrunk,
             shrink_note=shrink_note,
             category=attempt.category,
+            score=attempt.score,
         )
         if self._on_progress is not None:
             self._on_progress(
@@ -817,4 +824,5 @@ def run_tests(  # noqa: PLR0913  the problem, implementations and cases plus thr
         outcomes=outcomes,
         settings=test_run.settings,
         dimensions=tuple(problem.dimensions),
+        score_name=problem.score_name,
     )

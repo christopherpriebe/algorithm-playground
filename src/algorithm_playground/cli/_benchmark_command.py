@@ -16,6 +16,7 @@ from algorithm_playground.cli._benchmark_rendering import (
     print_footer,
     print_operation_issues,
     print_operation_tables,
+    print_score_table,
     print_single_table,
 )
 from algorithm_playground.cli._context import (
@@ -184,6 +185,7 @@ def _print_report(
         print_single_table(console, report)
     else:
         print_comparison_table(console, report, reference_name)
+    print_score_table(console, report)
     if report.settings.count_operations:
         print_operation_tables(console, report)
         print_operation_issues(console, report)

@@ -27,6 +27,7 @@ from helpers.fakes import (
     drop_last_above_five,
     sort_correctly,
 )
+from helpers.scoring import NearSortingProblem, keep_as_is
 
 PLAN = CasePlan(
     random_case_count=1,
@@ -108,6 +109,7 @@ def test_the_correctness_report_has_exactly_the_documented_top_level_keys(
         "passed",
         "settings",
         "dimensions",
+        "score_name",
         "cases",
         "implementations",
         "host",
@@ -120,7 +122,7 @@ def test_the_correctness_report_names_its_kind_version_and_problem(
 ) -> None:
     """Test the document names its kind, its format version and the problem."""
     assert testing_document["report"] == "test"
-    assert testing_document["format_version"] == TEST_FORMAT_VERSION == 3
+    assert testing_document["format_version"] == TEST_FORMAT_VERSION == 4
     assert testing_document["problem"] == "sorting"
 
 
@@ -335,10 +337,22 @@ def test_implementations_have_summaries_in_run_order(
 
     assert (good["name"], good["summary"]) == (
         "good",
-        {"passed": 2, "failed": 0, "errors": 0},
+        {"passed": 2, "failed": 0, "errors": 0, "scored": 0, "mean_score": None},
     )
-    assert bad["summary"] == {"passed": 1, "failed": 1, "errors": 0}
-    assert unbuilt["summary"] == {"passed": 0, "failed": 0, "errors": 0}
+    assert bad["summary"] == {
+        "passed": 1,
+        "failed": 1,
+        "errors": 0,
+        "scored": 0,
+        "mean_score": None,
+    }
+    assert unbuilt["summary"] == {
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "scored": 0,
+        "mean_score": None,
+    }
 
 
 def test_outcomes_follow_the_case_order(testing_document: dict[str, Any]) -> None:
@@ -378,6 +392,7 @@ def test_a_passing_outcome_has_no_failure_detail(
         "saved_shrunk_input": None,
         "shrink_note": None,
         "shrunk": None,
+        "score": None,
     }
 
 
@@ -426,3 +441,44 @@ def test_a_plan_without_a_maximum_records_the_default_maximum(
     )
 
     assert document["settings"]["maximum_size"] == {"size": 100}
+
+
+def test_a_report_without_scores_names_no_score(
+    testing_document: dict[str, Any],
+) -> None:
+    """Test a problem that scores nothing records no score name."""
+    assert testing_document["score_name"] is None
+
+
+def test_scores_are_recorded_per_outcome_and_summarized() -> None:
+    """Test each outcome records its score and each implementation its mean over the scored cases."""
+    problem = NearSortingProblem()
+    cases = [
+        resolve_case(problem, identifier)
+        for identifier in ("fixture:two_unsorted", "fixture:reverse_sorted")
+    ]
+    implementations = build_named_implementations("exact", "lazy")
+    report = run_tests(
+        problem,
+        implementations,
+        cases,
+        runner_factory=FakeRunners({"exact": sort_correctly, "lazy": keep_as_is}),
+    )
+
+    document = convert_correctness_report_to_json(
+        report, implementations=implementations
+    )
+
+    assert document["score_name"] == "inversions"
+    exact, lazy = document["implementations"]
+    assert [outcome["score"] for outcome in exact["outcomes"]] == [0.0, 0.0]
+    assert [outcome["score"] for outcome in lazy["outcomes"]] == [1.0, 45.0]
+    assert exact["summary"] == {
+        "passed": 2,
+        "failed": 0,
+        "errors": 0,
+        "scored": 2,
+        "mean_score": 0.0,
+    }
+    assert lazy["summary"]["scored"] == 2
+    assert lazy["summary"]["mean_score"] == 23.0

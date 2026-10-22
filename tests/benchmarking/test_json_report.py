@@ -19,6 +19,8 @@ from algorithm_playground.core import (
     Size,
     SizeMeasurement,
     convert_benchmark_report_to_json,
+    generate_case,
+    get_default_generator,
     run_benchmark,
     summarize,
 )
@@ -31,6 +33,7 @@ from helpers.fakes import (
     crash,
     sort_correctly,
 )
+from helpers.scoring import NearSortingProblem, count_inversions, keep_as_is
 from helpers.sizes import build_sizes
 from helpers.two_dimensions import TwoDimensionProblem, add_pair
 
@@ -121,6 +124,7 @@ def test_the_benchmark_report_has_exactly_the_documented_top_level_keys(
         "settings",
         "dimensions",
         "growth_dimension",
+        "score_name",
         "implementations",
         "host",
         "metadata",
@@ -132,7 +136,7 @@ def test_the_benchmark_report_names_its_kind_version_and_problem(
 ) -> None:
     """Test the document names its kind, its format version and the problem."""
     assert document["report"] == "benchmark"
-    assert document["format_version"] == BENCHMARK_FORMAT_VERSION == 7
+    assert document["format_version"] == BENCHMARK_FORMAT_VERSION == 8
     assert document["problem"] == "sorting"
 
 
@@ -230,6 +234,7 @@ def test_successful_implementation_results_have_the_documented_keys_and_sorted_s
             "case_identifier",
             "operation_counts",
             "operation_issue",
+            "scores",
             "samples_seconds",
             "raw_samples_seconds",
             "minimum_seconds",
@@ -600,3 +605,31 @@ def test_sizes_are_recorded_by_dimension() -> None:
         {"vertices": 2, "edges": 3},
         {"vertices": 2, "edges": 6},
     ]
+
+
+def test_a_report_without_scores_names_no_score(document: dict[str, Any]) -> None:
+    """Test a problem that scores nothing records no score name and empty scores."""
+    assert document["score_name"] is None
+    assert all(
+        record["scores"] == [] for record in document["implementations"][0]["results"]
+    )
+
+
+def test_scores_are_recorded_per_result() -> None:
+    """Test each result lists the scores of its verified repetitions and the report the name."""
+    report = run_benchmark(
+        NearSortingProblem(),
+        build_named_implementations("lazy"),
+        build_settings(seed=3, sizes=build_sizes(4), repetitions=2),
+        runner_factory=FakeRunners({"lazy": keep_as_is}),
+    )
+
+    document = convert_benchmark_report_to_json(report)
+
+    assert document["score_name"] == "inversions"
+    (record,) = document["implementations"][0]["results"]
+    generator = get_default_generator(NearSortingProblem())
+    inversions = count_inversions(
+        generate_case(generator, size=Size(size=4), seed=3).input_data
+    )
+    assert record["scores"] == [float(inversions), float(inversions)]

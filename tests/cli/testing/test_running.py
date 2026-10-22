@@ -12,6 +12,7 @@ from typer.testing import Result
 from helpers.fakes import FakeRunners
 from helpers.misbehaving import count_distinct_values
 from helpers.registration import register_faulty_problem, register_other_problem
+from helpers.scoring import keep_as_is, register_near_sorting_problem
 from helpers.support import (
     Configure,
     assert_exits_with,
@@ -388,3 +389,20 @@ def test_a_verify_that_raises_is_an_error_outcome_not_a_crash(
 
     assert_exits_with(result, 1)
     assert "verify exploded" in result.stdout
+
+
+def test_the_summary_names_the_mean_score_of_a_scored_problem(
+    use_fake_test_runners: UseFakeTestRunners,
+) -> None:
+    """Test the summary line of a scored problem gives the mean score over the scored cases."""
+    use_fake_test_runners({"lazy": keep_as_is})
+    name = register_near_sorting_problem()
+
+    result = invoke_cli(
+        *["test", name, "--command", "lazy", "--no-shrink"],
+        *["--fixture", "two_unsorted", "--fixture", "reverse_sorted"],
+    )
+
+    assert result.exit_code == 0, result.stdout + result.stderr
+    assert "lazy: 2/2 cases passed" in result.stdout
+    assert "mean inversions 23 over 2 scored cases" in result.stdout

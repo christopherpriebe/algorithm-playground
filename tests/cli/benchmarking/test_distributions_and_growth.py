@@ -418,7 +418,7 @@ def test_the_json_report_records_distributions_and_growth(
     assert result.exit_code == 0, result.stdout
     report = json.loads(json_path.read_text())
     assert report["report"] == "benchmark"
-    assert report["format_version"] == 7
+    assert report["format_version"] == 8
     assert report["settings"]["distributions"] == ["sorted", "all_equal"]
     (implementation,) = report["implementations"]
     assert [

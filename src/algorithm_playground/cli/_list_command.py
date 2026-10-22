@@ -85,6 +85,17 @@ def _describe_dimensions(problem: AnyProblem) -> str | None:
     return f"Dimensions: {listing}."
 
 
+def _describe_score(problem: AnyProblem) -> str:
+    """Say what the problem's verifier scores, or that it scores nothing.
+
+    Returns:
+        The line to print.
+    """
+    if problem.score_name is None:
+        return "Score: none."
+    return f"Score: {escape(problem.score_name)}."
+
+
 def _print_distributions(context: CommandContext, problem: AnyProblem) -> None:
     generators = context.call_hook("generators", lambda: list(problem.generators()))
     table = Table(title=f"Distributions ({len(generators)})")
@@ -112,6 +123,7 @@ def _print_problem(context: CommandContext, problem_name: str) -> None:
     if dimensions is not None:
         context.console.print(dimensions, soft_wrap=True)
     context.console.print(_describe_trace_format(problem), soft_wrap=True)
+    context.console.print(_describe_score(problem), soft_wrap=True)
     context.console.print(_describe_input_files(problem), soft_wrap=True)
 
 
@@ -176,7 +188,7 @@ def list_command(
             metavar="[PROBLEM]",
             help=(
                 "Show the details of this problem: its fixtures, distributions, trace format, "
-                "and operations. Without it, list every registered problem."
+                "operations, and score. Without it, list every registered problem."
             ),
         ),
     ] = None,

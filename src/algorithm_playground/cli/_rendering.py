@@ -17,6 +17,7 @@ from algorithm_playground.core._dimensions import Size
 __all__ = [
     "create_progress_display",
     "create_progress_display_with_bar",
+    "format_score",
     "format_size",
     "print_table",
 ]
@@ -35,6 +36,21 @@ def format_size(size: Size) -> str:
     if len(size) == 1:
         return f"{next(iter(size.values())):,}"
     return " ".join(f"{name}={value:,}" for name, value in size.items())
+
+
+def format_score(value: float) -> str:
+    """Write a score for a table cell or a message.
+
+    Args:
+        value: The score.
+
+    Returns:
+        A whole number without decimals, anything else with two decimals, both
+        with thousands separators.
+    """
+    if float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.2f}"
 
 
 def _description_columns() -> list[ProgressColumn]:

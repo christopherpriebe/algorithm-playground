@@ -17,6 +17,7 @@ from algorithm_playground.core import (
     validate_problem,
 )
 from algorithm_playground.problems.sorting import SortingProblem
+from helpers.scoring import NearSortingProblem
 from helpers.two_dimensions import Pair, TwoDimensionProblem
 
 
@@ -657,3 +658,47 @@ def test_a_reader_that_raises_is_named() -> None:
 def test_a_problem_without_a_reader_is_not_asked_for_one() -> None:
     """Test a problem that cannot read its inputs is not reported for it."""
     assert validate_problem(NoReaderSortingProblem()) == []
+
+
+def test_a_scoring_problem_is_valid() -> None:
+    """Test a problem whose verifier scores every output passes validation."""
+    assert validate_problem(NearSortingProblem()) == []
+
+
+@pytest.mark.parametrize("value", ["", 3], ids=["empty", "number"])
+def test_the_score_name_must_be_text_or_none(value: object) -> None:
+    """Test a score name that is not non-empty text is a finding."""
+    findings = validate_problem(build_sorting_variant(score_name=value))
+
+    assert any(
+        finding.startswith("the class attribute 'score_name' must be")
+        for finding in findings
+    )
+
+
+def test_a_score_without_a_name_is_reported() -> None:
+    """Test a verifier that scores while the problem declares no score name is a finding."""
+
+    def verify_with_a_score(
+        _: SortingProblem, _input_data: list[int], _output: list[int]
+    ) -> VerificationResult:
+        return VerificationResult(True, score=1.0)
+
+    findings = validate_problem(build_sorting_variant(verify=verify_with_a_score))
+
+    assert any(
+        finding.startswith("verify() returned a score for fixture")
+        and "declares no score_name" in finding
+        for finding in findings
+    )
+
+
+def test_a_named_score_that_the_verifier_does_not_give_is_reported() -> None:
+    """Test a problem that names a score its verifier never gives is a finding."""
+    findings = validate_problem(build_sorting_variant(score_name="inversions"))
+
+    assert any(
+        finding.startswith("verify() returned no score for fixture")
+        and "'inversions'" in finding
+        for finding in findings
+    )

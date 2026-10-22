@@ -1,5 +1,6 @@
 """Tests for the defaults of the Problem interface and for calling its hooks."""
 
+import math
 import random
 from pathlib import Path
 from typing import cast
@@ -382,3 +383,38 @@ def test_an_interrupt_is_not_swallowed() -> None:
 
     with pytest.raises(KeyboardInterrupt, match=r"^pressed during the hook$"):
         call_hook("fixtures", interrupt)
+
+
+@pytest.mark.parametrize("passed", [True, False], ids=["passed", "failed"])
+def test_a_verification_keeps_its_score(*, passed: bool) -> None:
+    """Test a score is kept as given, on a passed and on a failed result."""
+    result = VerificationResult(passed, message="judged", score=2.5)
+
+    assert result.score == 2.5
+
+
+def test_a_verification_has_no_score_by_default() -> None:
+    """Test a verification result carries no score unless the verifier gives one."""
+    assert VerificationResult(True).score is None
+
+
+@pytest.mark.parametrize(
+    "score", [math.nan, math.inf, "3", True], ids=["nan", "infinity", "text", "boolean"]
+)
+def test_a_score_must_be_a_finite_number(score: object) -> None:
+    """Test a score that is not a finite number is rejected."""
+    with pytest.raises(ValueError, match="finite number"):
+        VerificationResult(True, score=cast("float", score))
+
+
+def test_a_problem_scores_nothing_by_default(problem: MinimalProblem) -> None:
+    """Test a problem names no score by default."""
+    assert problem.score_name is None
+
+
+def test_an_integer_score_is_kept_as_a_number() -> None:
+    """Test a score given as an integer is stored as the same number, as a float."""
+    score = VerificationResult(True, score=3).score
+
+    assert score == 3.0
+    assert isinstance(score, float)

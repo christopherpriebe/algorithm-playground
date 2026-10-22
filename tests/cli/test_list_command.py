@@ -10,6 +10,7 @@ from typer.testing import Result
 
 from algorithm_playground.core import Problem
 from algorithm_playground.problems.sorting import SortingProblem
+from helpers.scoring import register_near_sorting_problem
 from helpers.support import (
     Configure,
     assert_exits_with,
@@ -333,3 +334,19 @@ def test_several_dimensions_are_listed_with_their_minimums() -> None:
     assert result.exit_code == 0, result.stderr
     assert "vertices (at least 1)" in result.stdout
     assert "edges" in result.stdout
+
+
+def test_a_problem_without_a_score_says_so(sorting_listing: Result) -> None:
+    """Test the listing of a problem that scores nothing says there is no score."""
+    assert "Score: none" in sorting_listing.stdout
+
+
+@pytest.mark.usefixtures("wide_terminal")
+def test_the_score_of_a_problem_is_named() -> None:
+    """Test the listing of a scored problem names what its verifier scores."""
+    name = register_near_sorting_problem()
+
+    result = invoke_cli("list", name)
+
+    assert result.exit_code == 0, result.stderr
+    assert "Score: inversions" in result.stdout

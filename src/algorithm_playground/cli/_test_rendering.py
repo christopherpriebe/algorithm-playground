@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from algorithm_playground.cli._rendering import print_table
+from algorithm_playground.cli._rendering import format_score, print_table
 from algorithm_playground.core._cases import AnyCase, FixtureOrigin, GeneratedOrigin
 from algorithm_playground.core._saved_inputs import SavedInputs
 from algorithm_playground.core._single_run import WRONG_OUTPUT_CATEGORY
@@ -203,6 +203,19 @@ def _print_implementation_failures(  # noqa: PLR0913  the failures, limit, repro
             f"{escape(_listed_identifiers(hidden))}",
             soft_wrap=True,
         )
+
+
+def _describe_scores(score_name: str | None, outcomes: Sequence[CaseOutcome]) -> str:
+    """Describe the mean score over the scored outcomes, when there are any.
+
+    Returns:
+        The text to append to the summary line, empty without scores.
+    """
+    scores = [outcome.score for outcome in outcomes if outcome.score is not None]
+    if not scores or score_name is None:
+        return ""
+    mean = format_score(sum(scores) / len(scores))
+    return f"; mean {score_name} {mean} over {len(scores)} scored cases"
 
 
 def _describe_passes(
@@ -486,7 +499,8 @@ def print_summaries(
             passed = sum(outcome.status is CaseStatus.PASSED for outcome in outcomes)
             detail = _describe_passes(outcomes, fixture_identifiers)
             color = "green" if passed == len(outcomes) else "red"
+            scores = _describe_scores(report.score_name, outcomes)
             console.print(
-                f"[{color}]{escape(name)}: {passed}/{len(outcomes)} cases passed{detail}[/{color}]",
+                f"[{color}]{escape(name)}: {passed}/{len(outcomes)} cases passed{detail}{escape(scores)}[/{color}]",
                 soft_wrap=True,
             )
