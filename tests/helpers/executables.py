@@ -1,8 +1,13 @@
 """Helpers that write executable scripts, for tests that run real processes."""
 
 import stat
+import sys
 import textwrap
 from pathlib import Path
+
+# The instrumented sorters, run as real processes by the tests that count operations.
+INSTRUMENTED_SORT = Path(__file__).resolve().parent / "instrumented_sort.py"
+INSTRUMENTED_INSERTION = f"{sys.executable} {INSTRUMENTED_SORT} insertion"
 
 SORTER_TEMPLATE = """\
     #!/usr/bin/env python3

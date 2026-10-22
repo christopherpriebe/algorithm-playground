@@ -2,8 +2,7 @@
 
 from pathlib import Path
 
-from algorithm_playground.problems.sorting import SortingTrace
-from algorithm_playground.problems.sorting.trace import read_trace
+from algorithm_playground.problems.sorting import SortingTrace, read_trace
 
 
 def write_trace(directory: Path, content: bytes) -> Path:

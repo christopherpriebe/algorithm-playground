@@ -1,27 +1,62 @@
 """Command-line invocation, output parsing and assertions shared by the CLI tests."""
 
+import dataclasses
 import struct
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner, Result
 
-from algorithm_playground.cli.main import app
+from algorithm_playground.cli import CommandDependencies, app
 
 # The type of the ``configure`` fixture, which writes a configuration file.
 Configure = Callable[..., Path]
 
 
-def invoke_cli(*arguments: str) -> Result:
+@dataclasses.dataclass(slots=True)
+class _ActiveDependencies:
+    """The collaborators that the commands run by these helpers are handed."""
+
+    value: CommandDependencies = dataclasses.field(default_factory=CommandDependencies)
+
+
+_ACTIVE_DEPENDENCIES = _ActiveDependencies()
+
+
+def replace_command_dependencies(
+    monkeypatch: pytest.MonkeyPatch, **replacements: object
+) -> None:
+    """Hand the commands these collaborators for the rest of the test.
+
+    Later calls add to earlier ones, and the defaults come back after the test.
+
+    Args:
+        monkeypatch: The test's monkeypatch, which undoes the change.
+        **replacements: Fields of :class:`CommandDependencies` and their new values.
+    """
+    monkeypatch.setattr(
+        _ACTIVE_DEPENDENCIES,
+        "value",
+        dataclasses.replace(_ACTIVE_DEPENDENCIES.value, **replacements),
+    )
+
+
+def invoke_cli(*arguments: str, keystrokes: str | None = None) -> Result:
     """Run the command-line app in-process with the given arguments.
+
+    The commands get the collaborators set with :func:`replace_command_dependencies`.
 
     Args:
         *arguments: The command-line arguments after the program name.
+        keystrokes: What to type on standard input, if anything.
 
     Returns:
         The result Click collected: exit code, output streams and exception.
     """
-    return CliRunner().invoke(app, list(arguments))
+    return CliRunner().invoke(
+        app, list(arguments), input=keystrokes, obj=_ACTIVE_DEPENDENCIES.value
+    )
 
 
 def parse_table_rows(output: str) -> list[list[str]]:
@@ -60,7 +95,7 @@ def read_logged_inputs(log: Path) -> list[list[int]]:
     Returns:
         The values of every logged input, in the order they were received.
     """
-    inputs = []
+    inputs: list[list[int]] = []
     for line in log.read_text().splitlines():
         raw = bytes.fromhex(line)
         (count,) = struct.unpack_from("<Q", raw)

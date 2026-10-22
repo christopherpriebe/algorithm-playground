@@ -1,19 +1,30 @@
 """Shared pytest fixtures for the algorithm-playground test suite."""
 
+import functools
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from itertools import islice
 from pathlib import Path
+from typing import Any
 
 import pytest
-from helpers.executables import write_executable
+from typing_extensions import override
 
-from algorithm_playground.cli import test_command
-from algorithm_playground.core import registry
-from algorithm_playground.core.problem import Fixture, VerificationResult
+from algorithm_playground.core import (
+    DEFAULT_CONFIGURATION_FILE_NAME,
+    Fixture,
+    VerificationResult,
+    restore_registry,
+    run_benchmark,
+    run_tests,
+    snapshot_registry,
+)
 from algorithm_playground.problems.sorting import SortingProblem
+from helpers.executables import write_executable
+from helpers.fakes import FakeRunners
+from helpers.support import replace_command_dependencies
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -21,8 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 class ExplodingVerificationProblem(SortingProblem):
     """The sorting problem with a verifier that raises, to test how the engines cope."""
 
+    @override
     def verify(self, input_data: list[int], output: list[int]) -> VerificationResult:
-        raise RuntimeError("verifier exploded")
+        message = "verifier exploded"
+        raise RuntimeError(message)
 
 
 @pytest.fixture
@@ -39,10 +52,10 @@ def _isolate_problem_loading(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     problems a test registers, and ``sys.path`` gains the directories a test adds so
     that problem modules can be imported. Restoring them keeps tests independent.
     """
-    snapshot = registry.snapshot_registry()
+    snapshot = snapshot_registry()
     monkeypatch.setattr(sys, "path", list(sys.path))
     yield
-    registry.restore_registry(snapshot)
+    restore_registry(snapshot)
 
 
 @pytest.fixture
@@ -125,7 +138,7 @@ def only_first_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
         return islice(original(self), 1)
 
     monkeypatch.setattr(SortingProblem, "fixtures", first_fixture)
-    monkeypatch.setattr(test_command, "DEFAULT_RANDOM_CASE_COUNT", 0)
+    replace_command_dependencies(monkeypatch, default_random_case_count=0)
 
 
 @pytest.fixture(scope="session")
@@ -208,3 +221,97 @@ def crashing_executable(tmp_path_factory: pytest.TempPathFactory) -> Path:
         sys.exit(3)
         """,
     )
+
+
+@pytest.fixture
+def configure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., Path]:
+    """Write the default configuration file from entries and make its directory current."""
+
+    def write(*entries: str) -> Path:
+        path = tmp_path / DEFAULT_CONFIGURATION_FILE_NAME
+        path.write_text("\n".join(entries))
+        monkeypatch.chdir(tmp_path)
+        return path
+
+    return write
+
+
+@pytest.fixture
+def use_fake_runners(monkeypatch: pytest.MonkeyPatch) -> Callable[..., FakeRunners]:
+    """Make ``benchmark`` run implementations through in-process fakes with set durations.
+
+    Implementations are then named on the command line with ``--command NAME``;
+    the commands are never run, nor checked for existing. Returns the factory so a test
+    can inspect the calls.
+    """
+
+    def install(
+        behaviors: Mapping[str, Callable[[Any], Any]],
+        durations: Mapping[str, float | Callable[[Any], float]] | None = None,
+        traces: Mapping[str, Callable[[Any], Any]] | None = None,
+        traced_behaviors: Mapping[str, Callable[[Any], Any]] | None = None,
+    ) -> FakeRunners:
+        runners = FakeRunners(behaviors, durations, traces, traced_behaviors)
+        replace_command_dependencies(
+            monkeypatch,
+            check_can_start=lambda _: None,
+            run_benchmark=functools.partial(run_benchmark, runner_factory=runners),
+        )
+        return runners
+
+    return install
+
+
+@pytest.fixture
+def use_fake_test_runners(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[..., FakeRunners]:
+    """Make ``test`` run implementations through in-process fakes.
+
+    Implementations are then named on the command line with ``--command NAME``;
+    the commands are never run, nor checked for existing. Returns the factory so a test
+    can inspect the calls.
+    """
+
+    def install(behaviors: Mapping[str, Callable[[Any], Any]]) -> FakeRunners:
+        runners = FakeRunners(behaviors)
+        replace_command_dependencies(
+            monkeypatch,
+            check_can_start=lambda _: None,
+            run_tests=functools.partial(run_tests, runner_factory=runners),
+        )
+        return runners
+
+    return install
+
+
+@pytest.fixture
+def recording_sorter(tmp_path: Path) -> tuple[Path, Path]:
+    """A correct sorter that appends the bytes of every input it receives to a log file."""
+    log = tmp_path / "inputs.log"
+    script = write_executable(
+        tmp_path / "recording_sorter.py",
+        f"""\
+        #!/usr/bin/env python3
+        import struct, sys
+        raw = open(sys.argv[1], "rb").read()
+        with open({str(log)!r}, "a") as log:
+            log.write(raw.hex() + "\\n")
+        count = struct.unpack_from("<Q", raw)[0]
+        values = sorted(struct.unpack_from(f"<{{count}}i", raw, 8))
+        open(sys.argv[2], "wb").write(struct.pack(f"<Q{{count}}i", count, *values))
+        """,
+    )
+    return script, log
+
+
+@pytest.fixture
+def wide_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the terminal wide, so long names and paths are not wrapped in the output."""
+    monkeypatch.setenv("COLUMNS", "200")
+
+
+@pytest.fixture
+def problem() -> SortingProblem:
+    """A fresh sorting problem."""
+    return SortingProblem()

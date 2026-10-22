@@ -3,7 +3,7 @@
 Registrations are undone after each test by the autouse ``_isolate_problem_loading`` fixture.
 """
 
-from algorithm_playground.core import registry
+from algorithm_playground.core import register_problem
 from algorithm_playground.problems.sorting import SortingProblem
 from helpers.misbehaving import PROBLEM_NAME, build_faulty_problem_class
 
@@ -14,7 +14,7 @@ def register_other_problem(name: str) -> None:
     Args:
         name: The name to register the copy under.
     """
-    registry.register_problem(type("OtherProblem", (SortingProblem,), {"name": name}))
+    register_problem(type("OtherProblem", (SortingProblem,), {"name": name}))
 
 
 def register_faulty_problem(fault: str = "") -> str:
@@ -26,5 +26,5 @@ def register_faulty_problem(fault: str = "") -> str:
     Returns:
         The name the problem is registered under.
     """
-    registry.register_problem(build_faulty_problem_class(fault))
+    register_problem(build_faulty_problem_class(fault))
     return PROBLEM_NAME

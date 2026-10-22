@@ -88,7 +88,8 @@ ALGORITHMS = {"insertion": insertion_sort, "merge": merge_sort}
 
 
 def encode_trace(
-    snapshots: Iterable[Sequence[int]] | None = None, events: Iterable[Event] | None = None
+    snapshots: Iterable[Sequence[int]] | None = None,
+    events: Iterable[Event] | None = None,
 ) -> bytes:
     """Encode the sections of a trace file; leave out a section by passing ``None``."""
     encoded = bytearray()
@@ -118,7 +119,9 @@ def main(arguments: list[str]) -> int:
     wrong_final = "--wrong-final-snapshot" in arguments
     arguments = [argument for argument in arguments if not argument.startswith("--")]
     if len(arguments) not in (4, 5) or arguments[1] not in ALGORITHMS:
-        print("usage: instrumented_sort.py [--events-only] insertion|merge INPUT OUTPUT [TRACE]")
+        sys.stdout.write(
+            "usage: instrumented_sort.py [--events-only] insertion|merge INPUT OUTPUT [TRACE]\n"
+        )
         return 2
     raw = Path(arguments[2]).read_bytes()
     (count,) = struct.unpack_from("<Q", raw)

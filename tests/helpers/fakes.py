@@ -4,9 +4,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from algorithm_playground.core.implementation import Implementation
-from algorithm_playground.core.problem import Problem
-from algorithm_playground.core.runner import RunnerError, RunnerLike, RunResult
+from algorithm_playground.core import (
+    Implementation,
+    Problem,
+    RunnerError,
+    RunnerLike,
+    RunResult,
+)
 from algorithm_playground.problems.sorting import EventLog, SortingTrace
 from helpers.instrumented_sort import Recording, insertion_sort, merge_sort
 
@@ -53,16 +57,18 @@ class FakeRunners:
         self.timeouts: list[float | None] = []
 
     def __call__(
-        self, problem: Problem[Any, Any, Any], implementation: Implementation
+        self,
+        problem: Problem[Any, Any, Any],  # noqa: ARG002  signature fixed by the factory contract
+        implementation: Implementation,
     ) -> RunnerLike:
         name = implementation.name
         return _FakeRunner(
             name,
             self._behaviors[name],
-            self._traced_behaviors.get(name),
-            self._durations.get(name, DEFAULT_DURATION),
-            self._traces.get(name),
-            self,
+            traced_behavior=self._traced_behaviors.get(name),
+            duration=self._durations.get(name, DEFAULT_DURATION),
+            tracer=self._traces.get(name),
+            owner=self,
         )
 
     def collect_inputs_of(self, implementation_name: str) -> list[Any]:
@@ -73,10 +79,11 @@ class FakeRunners:
 class _FakeRunner:
     """A runner that answers from the behaviors of its :class:`FakeRunners` owner."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  one value per behavior the owner configures
         self,
         name: str,
         behavior: Callable[[Any], Any],
+        *,
         traced_behavior: Callable[[Any], Any] | None,
         duration: float | Callable[[Any], float],
         tracer: Callable[[Any], Any] | None,
@@ -89,13 +96,15 @@ class _FakeRunner:
         self._tracer = tracer
         self._owner = owner
 
-    def run(self, input_data: Any, *, timeout_seconds: float | None = None) -> RunResult[Any, Any]:
+    def run(
+        self, input_data: object, *, timeout_seconds: float | None = None
+    ) -> RunResult[object, object]:
         self._record_call(input_data, timeout_seconds)
         return self._result(input_data, self._behavior, trace=None, trace_error=None)
 
     def run_with_trace(
-        self, input_data: Any, *, timeout_seconds: float | None = None
-    ) -> RunResult[Any, Any]:
+        self, input_data: object, *, timeout_seconds: float | None = None
+    ) -> RunResult[object, object]:
         self._record_call(input_data, timeout_seconds)
         self._owner.traced_calls.append(self._name)
         trace = self._tracer(input_data) if self._tracer is not None else None
@@ -105,18 +114,18 @@ class _FakeRunner:
         behavior = self._traced_behavior or self._behavior
         return self._result(input_data, behavior, trace=trace, trace_error=trace_error)
 
-    def _record_call(self, input_data: Any, timeout_seconds: float | None) -> None:
+    def _record_call(self, input_data: object, timeout_seconds: float | None) -> None:
         self._owner.calls.append((self._name, input_data))
         self._owner.timeouts.append(timeout_seconds)
 
     def _result(
         self,
-        input_data: Any,
+        input_data: object,
         behavior: Callable[[Any], Any],
         *,
-        trace: Any,
+        trace: object,
         trace_error: str | None,
-    ) -> RunResult[Any, Any]:
+    ) -> RunResult[object, object]:
         return RunResult(
             output=behavior(input_data),
             trace=trace,
@@ -127,7 +136,7 @@ class _FakeRunner:
             standard_error="",
         )
 
-    def _wall_seconds(self, input_data: Any) -> float:
+    def _wall_seconds(self, input_data: object) -> float:
         if isinstance(self._duration, int | float):
             return float(self._duration)
         return self._duration(input_data)
@@ -149,9 +158,10 @@ def drop_last_above_five(values: list[int]) -> list[int]:
     return result[:-1] if len(values) > 5 else result
 
 
-def crash(values: list[int]) -> list[int]:
+def crash(values: list[int]) -> list[int]:  # noqa: ARG001  signature fixed by the behavior contract
     """Fail the way a runner reports an implementation that exited with an error."""
-    raise RunnerError("Implementation 'crash' exited with code 3.\nstandard error:\nkaboom")
+    message = "Implementation 'crash' exited with code 3.\nstandard error:\nkaboom"
+    raise RunnerError(message)
 
 
 def _build_trace(recording: Recording) -> SortingTrace:

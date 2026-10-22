@@ -12,6 +12,8 @@ import random
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
+from typing_extensions import override
+
 from algorithm_playground.authoring import (
     Fixture,
     InputGenerator,
@@ -33,9 +35,13 @@ def generate_uniform(random_generator: random.Random, size: int) -> list[int]:
     return [random_generator.randint(0, 9) for _ in range(size)]
 
 
-def generate_broken(random_generator: random.Random, size: int) -> list[int]:
+def generate_broken(
+    random_generator: random.Random,  # noqa: ARG001  signature fixed by the generator contract
+    size: int,  # noqa: ARG001  signature fixed by the generator contract
+) -> list[int]:
     """Fail for every size, as a generator that is broken."""
-    raise RuntimeError("generator exploded")
+    message = "generator exploded"
+    raise RuntimeError(message)
 
 
 class FaultyProblem(Problem[list[int], int, None]):
@@ -45,49 +51,66 @@ class FaultyProblem(Problem[list[int], int, None]):
     description = "misbehaving [bold]problem[/bold]"
     fault = ""
 
+    @override
     def serialize_input(self, data: list[int], path: Path) -> None:
         if self.fault == "serialize_input":
-            raise RuntimeError("serialize_input exploded")
+            message = "serialize_input exploded"
+            raise RuntimeError(message)
         with path.open("wb") as stream:
             write_u64(stream, len(data))
             write_i32_array(stream, data)
 
+    @override
     def deserialize_input(self, path: Path) -> list[int]:
         with path.open("rb") as stream:
             values = read_i32_array(stream, read_u64(stream))
             expect_end_of_stream(stream, "input")
         return values
 
+    @override
     def deserialize_output(self, path: Path) -> int:
         with path.open("rb") as stream:
             count = read_u64(stream)
             expect_end_of_stream(stream, "output")
         return count
 
+    @override
     def fixtures(self) -> Iterable[Fixture[list[int]]]:
         if self.fault == "fixtures":
-            raise RuntimeError("fixtures exploded")
+            message = "fixtures exploded"
+            raise RuntimeError(message)
         yield Fixture("one", [1], "a [red]fixture[/red] description")
 
+    @override
     def generators(self) -> Sequence[InputGenerator[list[int]]]:
         if self.fault == "generators":
-            raise RuntimeError("generators exploded")
+            message = "generators exploded"
+            raise RuntimeError(message)
         generators = [InputGenerator("uniform", "uniform values", generate_uniform)]
         if self.fault == "generator":
-            generators.append(InputGenerator("broken", "always raises", generate_broken))
+            generators.append(
+                InputGenerator("broken", "always raises", generate_broken)
+            )
         return generators
 
+    @override
     def verify(self, input_data: list[int], output: int) -> VerificationResult:
         if self.fault == "verify":
-            raise RuntimeError("verify exploded")
+            message = "verify exploded"
+            raise RuntimeError(message)
         expected = len(set(input_data))
-        return VerificationResult(output == expected, f"expected {expected}, got {output}")
+        return VerificationResult(
+            output == expected, f"expected {expected}, got {output}"
+        )
 
+    @override
     def expected_output(self, input_data: list[int]) -> int | None:
         if self.fault == "expected_output":
-            raise RuntimeError("expected_output exploded")
+            message = "expected_output exploded"
+            raise RuntimeError(message)
         return len(set(input_data))
 
+    @override
     def shrink(self, input_data: list[int]) -> Iterator[list[int]]:
         return shrink_sequence(input_data)
 
