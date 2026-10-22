@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # implementation.py imports this module, so the import is for annotations only.
-    from algorithm_playground.core.implementation import Implementation
+    from algorithm_playground.core._implementation import Implementation
 
 __all__ = ["display_path", "split_command_text", "validate_implementations"]
 
@@ -27,9 +27,11 @@ def split_command_text(text: str) -> tuple[str, ...]:
     try:
         arguments = shlex.split(text)
     except ValueError as error:
-        raise ValueError(f"Could not parse command {text!r}: {error}") from error
+        message = f"Could not parse command {text!r}: {error}"
+        raise ValueError(message) from error
     if not arguments:
-        raise ValueError("A command must not be empty")
+        message = "A command must not be empty"
+        raise ValueError(message)
     return tuple(arguments)
 
 
@@ -43,11 +45,13 @@ def validate_implementations(implementations: Sequence["Implementation"]) -> Non
         ValueError: If there are none or two share a name.
     """
     if not implementations:
-        raise ValueError("At least one implementation is required")
+        message = "At least one implementation is required"
+        raise ValueError(message)
     seen: set[str] = set()
     for implementation in implementations:
         if implementation.name in seen:
-            raise ValueError(f"Duplicate implementation name: '{implementation.name}'")
+            message = f"Duplicate implementation name: '{implementation.name}'"
+            raise ValueError(message)
         seen.add(implementation.name)
 
 

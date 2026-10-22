@@ -8,6 +8,9 @@ import struct
 import sys
 from pathlib import Path
 
+USAGE = "usage: distinct_count.py <input.bin> <output.bin>"
+REQUIRED_ARGUMENT_COUNT = 3  # the script name, the input path, the output path
+
 
 def main(arguments: list[str]) -> int:
     """Count the distinct values of the input file and write the count.
@@ -18,8 +21,8 @@ def main(arguments: list[str]) -> int:
     Returns:
         The exit status: 0 on success, 2 for a wrong number of arguments.
     """
-    if len(arguments) < 3:
-        print("usage: distinct_count.py <input.bin> <output.bin>", file=sys.stderr)
+    if len(arguments) < REQUIRED_ARGUMENT_COUNT:
+        print(USAGE, file=sys.stderr)
         return 2
     raw = Path(arguments[1]).read_bytes()
     (count,) = struct.unpack_from("<Q", raw)

@@ -5,15 +5,16 @@ A problem author imports everything from this one module::
     from algorithm_playground.authoring import Problem, register_problem, ...
 
 Everything here is part of the public API and changes only with a deliberate
-version bump: the :class:`Problem` interface with its value types, the
-registration decorator, the helpers that read and write the binary formats,
-the building blocks for shrinking, describing and replaying, the chart renderers
-that turn data into the text of a :class:`Frame`, and the validation kit. The
-rest of the package (the engines, the registry, the command-line front end) is
-not meant for problem authors. See the guide :doc:`/writing-a-problem`.
+version bump: the :class:`~algorithm_playground.core.Problem` interface with its
+value types, the registration decorator, the helpers that read and write the
+binary formats, the building blocks for shrinking, describing and replaying, the
+chart renderers that turn data into the text of a
+:class:`~algorithm_playground.core.Frame`, and the validation kit. The rest of
+the package (the engines, the registry, the command-line front end) is not meant
+for problem authors. See the guide :doc:`/writing-a-problem`.
 """
 
-from algorithm_playground.core.binary_format import (
+from algorithm_playground.core._binary_format import (
     BinaryFormatError,
     expect_end_of_stream,
     read_f64,
@@ -40,14 +41,15 @@ from algorithm_playground.core.binary_format import (
     write_u32_array,
     write_u64,
 )
-from algorithm_playground.core.cases import Fixture, InputGenerator
-from algorithm_playground.core.description import describe_sequence, truncate_text
-from algorithm_playground.core.frames import Frame, FrameSequence
-from algorithm_playground.core.problem import Problem, VerificationResult
-from algorithm_playground.core.registry import register_problem
-from algorithm_playground.core.replay import StateTimeline
-from algorithm_playground.core.shrinking import (
-    distinct,
+from algorithm_playground.core._cases import Fixture, InputGenerator
+from algorithm_playground.core._description import describe_sequence, truncate_text
+from algorithm_playground.core._errors import AlgorithmPlaygroundError
+from algorithm_playground.core._frames import Frame, FrameSequence
+from algorithm_playground.core._problem import Problem, VerificationResult
+from algorithm_playground.core._registry import register_problem
+from algorithm_playground.core._replay import StateTimeline
+from algorithm_playground.core._shrinking import (
+    deduplicate_candidates,
     shrink_each,
     shrink_fields,
     shrink_integer,
@@ -55,14 +57,15 @@ from algorithm_playground.core.shrinking import (
     shrink_integers,
     shrink_sequence,
 )
-from algorithm_playground.core.validation import assert_valid_problem, validate_problem
-from algorithm_playground.visualization.charts import (
+from algorithm_playground.core._validation import assert_valid_problem, validate_problem
+from algorithm_playground.visualization._charts import (
     BarHighlight,
     render_bar_chart,
     render_side_by_side_bar_charts,
 )
 
 __all__ = [
+    "AlgorithmPlaygroundError",
     "BarHighlight",
     "BinaryFormatError",
     "Fixture",
@@ -73,8 +76,8 @@ __all__ = [
     "StateTimeline",
     "VerificationResult",
     "assert_valid_problem",
+    "deduplicate_candidates",
     "describe_sequence",
-    "distinct",
     "expect_end_of_stream",
     "read_f64",
     "read_f64_array",

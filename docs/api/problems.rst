@@ -1,30 +1,38 @@
 ``algorithm_playground.problems``
 =================================
 
-Built-in problem implementations. Importing
-:mod:`algorithm_playground.problems` triggers each subpackage to register
-itself with the central registry.
+.. automodule:: algorithm_playground.problems
+   :no-members:
 
 Sorting
 -------
 
 .. automodule:: algorithm_playground.problems.sorting
+   :no-members:
 
-.. automodule:: algorithm_playground.problems.sorting.problem
+.. autoclass:: algorithm_playground.problems.sorting.SortingProblem
 
-.. automodule:: algorithm_playground.problems.sorting.codec
+.. autofunction:: algorithm_playground.problems.sorting.write_values
+.. autofunction:: algorithm_playground.problems.sorting.read_values
 
-.. automodule:: algorithm_playground.problems.sorting.events
+.. autoclass:: algorithm_playground.problems.sorting.EventType
+.. autoclass:: algorithm_playground.problems.sorting.SortingEvent
+.. autoclass:: algorithm_playground.problems.sorting.EventLog
 
-.. automodule:: algorithm_playground.problems.sorting.trace
+.. autoclass:: algorithm_playground.problems.sorting.SortingTrace
+.. autofunction:: algorithm_playground.problems.sorting.choose_start_values
+.. autofunction:: algorithm_playground.problems.sorting.read_trace
+.. autofunction:: algorithm_playground.problems.sorting.count_operations
 
-.. automodule:: algorithm_playground.problems.sorting.replay
+.. autofunction:: algorithm_playground.problems.sorting.build_sorting_timeline
+.. autofunction:: algorithm_playground.problems.sorting.find_replay_warnings
 
-.. automodule:: algorithm_playground.problems.sorting.frames
+.. autofunction:: algorithm_playground.problems.sorting.draw_sorting_trace_frames
+.. autofunction:: algorithm_playground.problems.sorting.draw_sorting_input_output_frame
 
-.. automodule:: algorithm_playground.problems.sorting.verification
+.. autofunction:: algorithm_playground.problems.sorting.verify_sorted
 
-.. automodule:: algorithm_playground.problems.sorting.fixtures
+.. autofunction:: algorithm_playground.problems.sorting.build_sorting_fixtures
 
-.. automodule:: algorithm_playground.problems.sorting.generators
-   :members: sorting_generators, median_of_three_killer_ranks
+.. autofunction:: algorithm_playground.problems.sorting.build_sorting_generators
+.. autofunction:: algorithm_playground.problems.sorting.compute_median_of_three_killer_ranks

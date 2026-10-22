@@ -23,8 +23,8 @@ Three modes:
 
 The bundled ``sorting`` problem (sort an array of ``i32`` ascending) is the
 reference implementation. A problem is an interface: subclass the
-:class:`~algorithm_playground.core.problem.Problem` ABC, decorate it with
-:func:`~algorithm_playground.core.registry.register_problem` (both come from
+:class:`~algorithm_playground.core.Problem` ABC, decorate it with
+:func:`~algorithm_playground.core.register_problem` (both come from
 :mod:`algorithm_playground.authoring`, the stable module for authors), and
 supply the binary format, some fixtures and input generators, and a verifier. Seeded
 random cases, failure reports with shrinking, and benchmarking come from the
@@ -57,3 +57,9 @@ found through configuration, a command-line option, or entry points; see
    api/core
    api/problems
    api/visualization
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Project
+
+   development

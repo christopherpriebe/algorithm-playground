@@ -29,7 +29,7 @@ do; the rest of the package may change between versions.
 The interface
 -------------
 
-Subclass :class:`~algorithm_playground.core.problem.Problem` and set the
+Subclass :class:`~algorithm_playground.core.Problem` and set the
 ``name`` and ``description`` class attributes (``minimum_size``,
 ``debug_generator`` and ``operation_names``, below, are optional). The type variables stand for
 the in-memory form of an input, of an output, and of a trace (use ``None`` when
@@ -44,17 +44,17 @@ Required members:
 
 ``deserialize_output(path)``
    Read an implementation's output file. Raise
-   :class:`~algorithm_playground.core.binary_format.BinaryFormatError` when it is
+   :class:`~algorithm_playground.core.BinaryFormatError` when it is
    malformed; the harness reports that as a failed run.
 
 ``fixtures()``
    Return the curated cases: an iterable of
-   :class:`~algorithm_playground.core.cases.Fixture` objects, each with a
+   :class:`~algorithm_playground.core.Fixture` objects, each with a
    unique ``name``, the ``input_data``, and an optional ``description``.
    Fixtures are small, hand-written inputs where a bug is easy to understand.
 
 ``generators()``
-   Return a sequence of :class:`~algorithm_playground.core.cases.InputGenerator`
+   Return a sequence of :class:`~algorithm_playground.core.InputGenerator`
    objects: a ``name``, a ``description``, and a function
    ``generate(random_generator, size)`` that builds an input of the given size
    from a seeded :class:`random.Random`. Generators are the problem's
@@ -64,7 +64,7 @@ Required members:
    generator has to accept every size from the problem's ``minimum_size`` up.
 
 ``verify(input_data, output)``
-   Return a :class:`~algorithm_playground.core.problem.VerificationResult`:
+   Return a :class:`~algorithm_playground.core.VerificationResult`:
    whether ``output`` is a valid answer for ``input_data`` and, if not, a
    message that says why. Two more fields are optional. ``focus`` is the position
    in the output where the first problem is (the index of the first element that
@@ -138,7 +138,7 @@ Optional methods, each with a working default:
    what lets ``debug --input-file`` run a saved input (``test
    --save-failing-inputs`` writes them), because checking the output needs the
    input itself, not only the file. Raise
-   :class:`~algorithm_playground.core.binary_format.BinaryFormatError` for a
+   :class:`~algorithm_playground.core.BinaryFormatError` for a
    malformed file. The default raises ``NotImplementedError``, which ``debug``
    reports as a problem that cannot read its input files; validation checks that
    a problem that has the hook reads back what it wrote.
@@ -151,7 +151,7 @@ Optional methods, each with a working default:
    ``input_data`` is the input the executable ran on: a format whose records
    refer to positions in the input validates them against it, and one that
    records only changes can start from it. Raise
-   :class:`~algorithm_playground.core.binary_format.BinaryFormatError` for a
+   :class:`~algorithm_playground.core.BinaryFormatError` for a
    malformed file; the runner then treats it as "no trace" and keeps the
    reason. Any other exception the hook raises is turned into the same kind of
    trace error, naming the hook.
@@ -181,7 +181,7 @@ snapshots and the events).
 
 ``input_output_frame(input_data, output)`` and ``trace_frames(input_data, output, trace)``
    What ``debug`` shows. A problem does not print and does not run a stepper: it
-   returns :class:`~algorithm_playground.core.frames.Frame` objects and the
+   returns :class:`~algorithm_playground.core.Frame` objects and the
    stepper in :mod:`algorithm_playground.visualization` plays them back with
    single-key navigation. ``input_output_frame`` returns one frame for the input and
    output, or ``None`` (the default), and is shown when there is no usable trace
@@ -192,10 +192,10 @@ snapshots and the events).
    produce it), a short ``caption`` (the operation that led to the step, running
    totals) and the ``highlighted_indices`` the body draws emphasized. A trace
    can have far more steps than are worth drawing in advance, so return a
-   :class:`~algorithm_playground.core.frames.FrameSequence`, which builds a frame
+   :class:`~algorithm_playground.core.FrameSequence`, which builds a frame
    only when the stepper asks for it.
 
-The binary helpers of :mod:`algorithm_playground.core.binary_format`
+The binary helpers of :mod:`algorithm_playground.core`
 (``write_u64``, ``read_i32_array``, and the others, with ``BinaryFormatError``)
 are exported from :mod:`algorithm_playground.authoring`.
 
@@ -250,7 +250,7 @@ of a problem whose input is an array of numbers (the sorting problem's);
 one number and for the elements of a sequence one at a time;
 ``shrink_fields(value, {field: shrinker})`` applies a shrinker to each field of a
 dataclass, a named tuple or a tuple, which is how an input made of several parts
-is shrunk part by part; ``distinct(candidates, input)`` drops repeats. All of them
+is shrunk part by part; ``deduplicate_candidates(candidates, input)`` drops repeats. All of them
 yield the type they were given (a list stays a list). Together:
 
 .. code-block:: python
@@ -317,7 +317,7 @@ ends a command in a traceback. What happens depends on when the hook is called:
 Cases and identifiers
 ---------------------
 
-Fixtures and generators produce :class:`~algorithm_playground.core.cases.Case`
+Fixtures and generators produce :class:`~algorithm_playground.core.Case`
 objects, each with a stable identifier (``fixture:empty``,
 ``generated:uniform:size=37:seed=1234567``) that failure reports print and
 ``--case`` accepts. Because generators receive a seeded
@@ -330,7 +330,7 @@ canonical way: ``size=05``, ``seed=+7`` and ``size=1_0`` are refused rather than
 guessed at.
 
 ``build_cases(problem, plan)`` expands a
-:class:`~algorithm_playground.core.cases.CasePlan` (include fixtures, number of
+:class:`~algorithm_playground.core.CasePlan` (include fixtures, number of
 random cases, maximum size, distributions, seed) into the cases of a test run,
 and ``resolve_case(problem, identifier)`` rebuilds one case from its identifier.
 
@@ -338,7 +338,7 @@ Finding a problem
 -----------------
 
 Decorate the class with
-:func:`~algorithm_playground.core.registry.register_problem`; importing the
+:func:`~algorithm_playground.core.register_problem`; importing the
 module registers the problem. A class that leaves an abstract method
 unimplemented is refused at registration with the list of what is missing. The
 command-line tool imports modules from four places, and ``algorithm-playground
@@ -365,18 +365,18 @@ distributions (the default and the debug one marked), whether it has a trace
 format, and its operation names.
 
 Registering a problem in a test changes a table that the whole process shares.
-:func:`~algorithm_playground.core.registry.snapshot_registry` copies the table
-and :func:`~algorithm_playground.core.registry.restore_registry` puts the copy
+:func:`~algorithm_playground.core.snapshot_registry` copies the table
+and :func:`~algorithm_playground.core.restore_registry` puts the copy
 back, so a test or a fixture can undo whatever a test registered or loaded:
 take the snapshot first and restore it once the test is over.
 
 Checking a problem
 ------------------
 
-:func:`~algorithm_playground.core.validation.validate_problem` exercises a
+:func:`~algorithm_playground.core.validate_problem` exercises a
 problem the way the harness will, without any implementation, and returns a
 list of findings (empty means valid);
-:func:`~algorithm_playground.core.validation.assert_valid_problem` raises
+:func:`~algorithm_playground.core.assert_valid_problem` raises
 :class:`AssertionError` listing them, which makes it a one-line test:
 
 .. code-block:: python
@@ -400,14 +400,14 @@ text; and that the ``shrink`` candidates that ``check_input`` accepts serialize 
 differ from their input (a hook that yields copies of its input would never make
 progress). It cannot check
 the trace hooks, which need a trace; test those with a trace file of your own,
-as ``tests/unit/problems/sorting/test_trace.py`` does.
+as ``tests/sorting/test_traces.py`` does.
 
 Worked example
 --------------
 
 The reference :class:`~algorithm_playground.problems.sorting.SortingProblem`
 is a small, end-to-end example: see
-``src/algorithm_playground/problems/sorting/problem.py`` and the binary
+``src/algorithm_playground/problems/sorting/_problem.py`` and the binary
 format documented at :doc:`problems/sorting`. A minimal problem defined outside
 this package is in ``examples/distinct_count/`` and is explained in
 :doc:`writing-a-problem`.

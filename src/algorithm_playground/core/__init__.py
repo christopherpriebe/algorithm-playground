@@ -3,12 +3,12 @@
 Authors of problems import from :mod:`algorithm_playground.authoring`, the
 stable module that re-exports what they need. This package and
 :mod:`algorithm_playground.visualization` are public for code that drives the
-engines. :mod:`algorithm_playground.cli` is the command-line front end and has
+engines. ``algorithm_playground.cli`` is the command-line front end and has
 no compatibility guarantees; modules whose names start with an underscore are
 internal.
 """
 
-from algorithm_playground.core.benchmarking import (
+from algorithm_playground.core._benchmarking import (
     BenchmarkFailure,
     BenchmarkPhase,
     BenchmarkProgress,
@@ -20,11 +20,11 @@ from algorithm_playground.core.benchmarking import (
     OperationIssue,
     OperationIssueKind,
     SizeMeasurement,
+    count_total_runs,
     include_failed_implementations,
     run_benchmark,
-    total_runs,
 )
-from algorithm_playground.core.binary_format import (
+from algorithm_playground.core._binary_format import (
     BinaryFormatError,
     expect_end_of_stream,
     read_f64,
@@ -51,7 +51,7 @@ from algorithm_playground.core.binary_format import (
     write_u32_array,
     write_u64,
 )
-from algorithm_playground.core.cases import (
+from algorithm_playground.core._cases import (
     AnyCase,
     AnyFixture,
     AnyInputGenerator,
@@ -65,17 +65,17 @@ from algorithm_playground.core.cases import (
     InputGenerator,
     ShrunkOrigin,
     build_cases,
+    build_startup_case,
     check_sizes,
-    default_generator,
+    collect_problem_fixtures,
+    collect_problem_generators,
     generate_case,
+    get_default_generator,
     parse_case_identifier,
-    problem_fixtures,
-    problem_generators,
     resolve_case,
     select_generators,
-    startup_case,
 )
-from algorithm_playground.core.configuration import (
+from algorithm_playground.core._configuration import (
     DEFAULT_CONFIGURATION_FILE_NAME,
     Configuration,
     ConfigurationError,
@@ -85,18 +85,32 @@ from algorithm_playground.core.configuration import (
     load_configuration,
     load_configured_problems,
 )
-from algorithm_playground.core.description import describe_error, describe_sequence, truncate_text
-from algorithm_playground.core.frames import Frame, FrameSequence
-from algorithm_playground.core.hooks import HookError, call_hook
-from algorithm_playground.core.implementation import Implementation
-from algorithm_playground.core.problem import (
+from algorithm_playground.core._description import (
+    describe_error,
+    describe_sequence,
+    truncate_text,
+)
+from algorithm_playground.core._errors import AlgorithmPlaygroundError
+from algorithm_playground.core._frames import (
+    Frame,
+    FrameSequence,
+)
+from algorithm_playground.core._hooks import (
+    HookError,
+    call_hook,
+)
+from algorithm_playground.core._implementation import (
+    Implementation,
+)
+from algorithm_playground.core._problem import (
     AnyProblem,
     Problem,
     VerificationResult,
     has_input_reader,
     has_trace_format,
 )
-from algorithm_playground.core.registry import (
+from algorithm_playground.core._registry import (
+    ENTRY_POINT_GROUP,
     ProblemLoadError,
     ProblemRegistrationError,
     ProblemSource,
@@ -104,22 +118,26 @@ from algorithm_playground.core.registry import (
     RegistrySnapshot,
     UnknownProblemError,
     get_problem,
+    list_problem_descriptions,
+    list_problem_sources,
     list_problems,
     load_entry_point_problems,
     load_problem_modules,
-    problem_descriptions,
-    problem_sources,
     register_problem,
     restore_registry,
     snapshot_registry,
 )
-from algorithm_playground.core.replay import StateTimeline
-from algorithm_playground.core.report import (
-    JsonObject,
-    benchmark_report_to_json,
-    correctness_report_to_json,
+from algorithm_playground.core._replay import (
+    StateTimeline,
 )
-from algorithm_playground.core.runner import (
+from algorithm_playground.core._report import (
+    BENCHMARK_FORMAT_VERSION,
+    TEST_FORMAT_VERSION,
+    JsonObject,
+    convert_benchmark_report_to_json,
+    convert_correctness_report_to_json,
+)
+from algorithm_playground.core._runner import (
     BuildError,
     Runner,
     RunnerError,
@@ -129,12 +147,18 @@ from algorithm_playground.core.runner import (
     TemporaryFilePolicy,
     build_implementation,
     build_implementations,
+    build_subprocess_runner_factory,
     check_can_start,
-    subprocess_runner_factory,
 )
-from algorithm_playground.core.saved_inputs import SavedInputs, safe_file_name, save_failing_inputs
-from algorithm_playground.core.shrinking import (
-    distinct,
+from algorithm_playground.core._saved_inputs import (
+    INPUT_FILE_NAME,
+    SHRUNK_INPUT_FILE_NAME,
+    SavedInputs,
+    make_safe_file_name,
+    save_failing_inputs,
+)
+from algorithm_playground.core._shrinking import (
+    deduplicate_candidates,
     shrink_each,
     shrink_fields,
     shrink_integer,
@@ -142,20 +166,24 @@ from algorithm_playground.core.shrinking import (
     shrink_integers,
     shrink_sequence,
 )
-from algorithm_playground.core.single_run import (
+from algorithm_playground.core._single_run import (
+    PROBLEM_HOOK_CATEGORIES,
     CaseStatus,
     SingleRun,
     run_single,
     run_single_with_trace,
 )
-from algorithm_playground.core.statistics import (
+from algorithm_playground.core._statistics import (
     Growth,
     TimingSummary,
     estimate_growth,
     estimate_growth_exponent,
     fit_growth_class,
+    format_duration,
+    subtract_startup,
+    summarize,
 )
-from algorithm_playground.core.testing import (
+from algorithm_playground.core._testing import (
     CaseOutcome,
     CasePhase,
     CaseProgress,
@@ -168,10 +196,20 @@ from algorithm_playground.core.testing import (
     describe_failure,
     run_tests,
 )
-from algorithm_playground.core.validation import assert_valid_problem, validate_problem
+from algorithm_playground.core._validation import (
+    assert_valid_problem,
+    validate_problem,
+)
 
 __all__ = [
+    "BENCHMARK_FORMAT_VERSION",
     "DEFAULT_CONFIGURATION_FILE_NAME",
+    "ENTRY_POINT_GROUP",
+    "INPUT_FILE_NAME",
+    "PROBLEM_HOOK_CATEGORIES",
+    "SHRUNK_INPUT_FILE_NAME",
+    "TEST_FORMAT_VERSION",
+    "AlgorithmPlaygroundError",
     "AnyCase",
     "AnyFixture",
     "AnyInputGenerator",
@@ -236,40 +274,45 @@ __all__ = [
     "UnknownProblemError",
     "VerificationResult",
     "assert_valid_problem",
-    "benchmark_report_to_json",
     "build_cases",
     "build_implementation",
     "build_implementations",
+    "build_startup_case",
+    "build_subprocess_runner_factory",
     "call_hook",
     "check_can_start",
     "check_configured_problems",
     "check_sizes",
-    "correctness_report_to_json",
-    "default_generator",
+    "collect_problem_fixtures",
+    "collect_problem_generators",
+    "convert_benchmark_report_to_json",
+    "convert_correctness_report_to_json",
+    "count_total_runs",
+    "deduplicate_candidates",
     "describe_error",
     "describe_failure",
     "describe_sequence",
-    "distinct",
     "estimate_growth",
     "estimate_growth_exponent",
     "expect_end_of_stream",
     "find_configuration",
     "fit_growth_class",
+    "format_duration",
     "generate_case",
+    "get_default_generator",
     "get_problem",
     "has_input_reader",
     "has_trace_format",
     "include_failed_implementations",
+    "list_problem_descriptions",
+    "list_problem_sources",
     "list_problems",
     "load_configuration",
     "load_configured_problems",
     "load_entry_point_problems",
     "load_problem_modules",
+    "make_safe_file_name",
     "parse_case_identifier",
-    "problem_descriptions",
-    "problem_fixtures",
-    "problem_generators",
-    "problem_sources",
     "read_f64",
     "read_f64_array",
     "read_i32",
@@ -290,7 +333,6 @@ __all__ = [
     "run_single",
     "run_single_with_trace",
     "run_tests",
-    "safe_file_name",
     "save_failing_inputs",
     "select_generators",
     "shrink_each",
@@ -300,9 +342,8 @@ __all__ = [
     "shrink_integers",
     "shrink_sequence",
     "snapshot_registry",
-    "startup_case",
-    "subprocess_runner_factory",
-    "total_runs",
+    "subtract_startup",
+    "summarize",
     "truncate_text",
     "validate_problem",
     "write_f64",

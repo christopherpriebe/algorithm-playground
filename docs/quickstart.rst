@@ -18,7 +18,7 @@ installed package. To follow this page, or to work on the project, clone it:
 
    $ git clone https://github.com/christopherpriebe/algorithm-playground.git
    $ cd algorithm-playground
-   $ uv sync --extra dev
+   $ uv sync
 
 The commands below use ``uv run`` to run ``algorithm-playground`` from that
 checkout; with an installed tool, drop the ``uv run`` prefix:

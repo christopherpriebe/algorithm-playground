@@ -1,10 +1,7 @@
 """Algorithm playground: a learning and benchmarking sandbox for algorithms."""
 
-from importlib.metadata import PackageNotFoundError, version
-
-try:
-    __version__ = version("algorithm-playground")
-except PackageNotFoundError:
-    __version__ = "0.0.0+local"
+from importlib.metadata import version
 
 __all__ = ["__version__"]
+
+__version__ = version("algorithm-playground")
