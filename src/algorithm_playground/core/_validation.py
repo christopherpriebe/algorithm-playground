@@ -292,7 +292,13 @@ class _Validator:
             f"deserialize_input() raised for {subject}",
             lambda: self._problem.deserialize_input(self._scratch),
         )
-        if succeeded and read_back != input_data:
+        if not succeeded:
+            return
+        compared, is_equal = self._attempt(
+            f"comparing the input read back by deserialize_input() with the one written for {subject} raised",
+            lambda: bool(read_back == input_data),
+        )
+        if compared and is_equal is False:
             self._record(
                 f"deserialize_input() does not return the input that serialize_input wrote "
                 f"for {subject}"
@@ -370,8 +376,15 @@ class _Validator:
             if not succeeded:
                 continue
             succeeded, second = self._attempt(f"{subject} raised", generate)
-            if succeeded and first != second:
-                self._record(f"{subject} returned different inputs for the same seed")
+            if succeeded:
+                compared, is_equal = self._attempt(
+                    f"comparing the inputs of {subject} for the same seed raised",
+                    lambda first=first, second=second: bool(first == second),
+                )
+                if compared and is_equal is False:
+                    self._record(
+                        f"{subject} returned different inputs for the same seed"
+                    )
             samples.append((subject, first))
         return samples
 
@@ -456,7 +469,11 @@ class _Validator:
         if not succeeded or candidates is None:
             return
         for candidate in candidates:
-            if candidate == input_data:
+            compared, is_equal = self._attempt(
+                f"comparing a shrink candidate of {subject} with its input raised",
+                lambda candidate=candidate: bool(candidate == input_data),
+            )
+            if compared and is_equal is True:
                 self._record(
                     f"shrink() yields a candidate equal to its input for {subject}; "
                     "candidates must differ from the input"

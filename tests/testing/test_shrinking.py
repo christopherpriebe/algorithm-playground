@@ -1,5 +1,6 @@
 """Tests for how the test engine shrinks a failing input."""
 
+import random
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -12,6 +13,7 @@ from algorithm_playground.core import (
     CaseProgress,
     CaseStatus,
     Implementation,
+    InputGenerator,
     RunnerError,
     ShrinkOptions,
     ShrunkFailure,
@@ -29,6 +31,7 @@ from helpers.fakes import (
     drop_last_above_five,
     sort_correctly,
 )
+from helpers.inputs import UnequatableValues
 
 LARGE_GENERATED = "generated:uniform:size=12:seed=5"
 
@@ -893,4 +896,46 @@ def test_a_check_that_raises_is_reported_in_a_note_naming_the_hook() -> None:
     assert report.outcomes[0].shrunk is None
     assert report.outcomes[0].shrink_note == (
         "the problem's check_input hook raised RuntimeError: check exploded"
+    )
+
+
+class UnequatableInputsProblem(SortingProblem):
+    """Sorting whose generated inputs cannot be compared, with a shrink hook that never compares."""
+
+    @override
+    def generators(self) -> tuple[InputGenerator[list[int]], ...]:
+        (uniform, *_) = super().generators()
+
+        def generate_unequatable(
+            random_generator: random.Random, size: int
+        ) -> list[int]:
+            return UnequatableValues(uniform.generate(random_generator, size=size))
+
+        return (
+            InputGenerator(
+                "uniform", description="uncomparable", generate=generate_unequatable
+            ),
+        )
+
+    @override
+    def shrink(self, input_data: list[int]) -> Iterator[list[int]]:
+        yield list(input_data)[:-1]
+
+
+def test_a_shrink_candidate_whose_comparison_raises_is_noted_as_such() -> None:
+    """Test a comparison that raises ends shrinking with a note that names the comparison."""
+    problem = UnequatableInputsProblem()
+
+    report = run_tests(
+        problem,
+        build_named_implementations("bad"),
+        [resolve_case(problem, LARGE_GENERATED)],
+        runner_factory=FakeRunners({"bad": drop_last_above_five}),
+    )
+
+    (outcome,) = report.outcomes
+    assert outcome.status is CaseStatus.FAILED
+    assert outcome.shrunk is None
+    assert outcome.shrink_note == (
+        "comparing a shrink candidate with its input raised TypeError: no equality here"
     )

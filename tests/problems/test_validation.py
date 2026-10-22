@@ -18,6 +18,7 @@ from algorithm_playground.core import (
     validate_problem,
 )
 from algorithm_playground.problems.sorting import SortingProblem
+from helpers.inputs import AmbiguousValues, IdentityValues, UnequatableValues
 from helpers.scoring import NearSortingProblem
 from helpers.two_dimensions import (
     Pair,
@@ -806,5 +807,58 @@ def test_a_size_check_that_raises_at_larger_sizes_is_reported() -> None:
     assert any(
         finding.startswith("check_size() raised for")
         and "RuntimeError: size check exploded" in finding
+        for finding in findings
+    )
+
+
+def build_problem_with_input_type(
+    input_type: type[list[int]],
+) -> SortingProblem:
+    """Build the sorting problem whose fixtures and generator produce inputs of a given type."""
+
+    def provide_fixtures(_: SortingProblem) -> Iterator[Fixture[list[int]]]:
+        yield Fixture("pair", input_type([2, 1]))
+
+    def generate_typed(random_generator: random.Random, size: int) -> list[int]:
+        return input_type(generate_values(random_generator, size))
+
+    def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
+        return (InputGenerator("typed", description="typed", generate=generate_typed),)
+
+    return build_sorting_variant(
+        fixtures=provide_fixtures, generators=provide_generator, debug_generator=None
+    )
+
+
+def test_an_input_whose_equality_raises_is_a_finding_not_a_crash() -> None:
+    """Test an input type whose comparison raises gives findings naming it, never a traceback."""
+    findings = validate_problem(build_problem_with_input_type(UnequatableValues))
+
+    assert findings
+    assert all("Traceback" not in finding for finding in findings)
+    assert any(
+        finding.startswith("comparing") and "TypeError: no equality here" in finding
+        for finding in findings
+    )
+
+
+def test_an_input_type_with_identity_equality_is_reported_as_nondeterministic() -> None:
+    """Test an input type equal only to itself is reported as a generator that is not deterministic."""
+    findings = validate_problem(build_problem_with_input_type(IdentityValues))
+
+    assert (
+        "generator 'typed' at size=0 returned different inputs for the same seed"
+        in findings
+    )
+
+
+def test_an_input_whose_comparison_cannot_be_judged_is_a_finding_not_a_crash() -> None:
+    """Test an input type whose comparison is neither true nor false gives a finding."""
+    findings = validate_problem(build_problem_with_input_type(AmbiguousValues))
+
+    assert findings
+    assert any(
+        finding.startswith("comparing")
+        and "ValueError: the truth value of a comparison is ambiguous" in finding
         for finding in findings
     )

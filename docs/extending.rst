@@ -38,6 +38,10 @@ the problem has no trace format); the sorting problem, for instance, is
 ``Problem[list[int], list[int], SortingTrace]``. A problem is created without
 arguments.
 
+An input type needs value equality, as a list, a tuple or a dataclass has:
+the validator compares inputs, and the shrinker skips a candidate equal to its
+input.
+
 Required members:
 
 ``serialize_input(data, path)``
@@ -448,7 +452,8 @@ Checking a problem
 
 :func:`~algorithm_playground.core.validate_problem` exercises a
 problem the way the harness will, without any implementation, and returns a
-list of findings (empty means valid);
+list of findings (empty means valid; the input type needs value equality, as
+described under "The interface");
 :func:`~algorithm_playground.core.assert_valid_problem` raises
 :class:`AssertionError` listing them, which makes it a one-line test:
 

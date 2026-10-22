@@ -449,8 +449,9 @@ class _Shrinker:
     The first that fails like ``original`` (the same status and category)
     becomes the new input and the search restarts from its candidates, until a
     full pass finds none or the budget runs out. A candidate that cannot be run
-    at all is skipped, and a shrink or ``check_input`` hook that raises ends the
-    search and leaves a note in ``note``. Each candidate runs with the smaller
+    at all is skipped, and a shrink or ``check_input`` hook that raises, or an
+    input type whose equality comparison raises, ends the search and leaves a
+    note in ``note``. Each candidate runs with the smaller
     of the implementation's timeout and the time the budget has left, and a
     candidate that times out under the shortened limit is inconclusive, not a
     failure.
@@ -506,7 +507,9 @@ class _Shrinker:
                     self._budget.record_exhaustion()
                     return None
                 self._budget.take_candidate()
-                if candidate == current or self._is_rejected(candidate):
+                if self._is_unchanged(candidate, current) or self._is_rejected(
+                    candidate
+                ):
                     continue
                 attempt = self._try(candidate)
                 if attempt is not None and attempt.is_same_failure_as(self._original):
@@ -516,6 +519,24 @@ class _Shrinker:
         except Exception as error:  # noqa: BLE001  the shrink hook is problem code
             self.note = f"the problem's shrink hook raised {describe_error(error)}"
         return None
+
+    def _is_unchanged(self, candidate: object, current: object) -> bool:
+        """Say whether ``candidate`` equals ``current``.
+
+        Returns:
+            ``True`` if the two compare equal.
+
+        Raises:
+            _HookError: If the comparison raises.
+        """
+        try:
+            return bool(candidate == current)
+        except Exception as error:
+            message = (
+                "comparing a shrink candidate with its input raised "
+                f"{describe_error(error)}"
+            )
+            raise _HookError(message) from error
 
     def _is_rejected(self, candidate: object) -> bool:
         """Say whether the problem's ``check_input`` rejects ``candidate``.
