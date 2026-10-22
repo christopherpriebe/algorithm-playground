@@ -34,3 +34,6 @@ CLAUDE.local.md
 
 # Compiled example executables
 examples/sorting/c_qsort
+
+# Hypothesis example database
+.hypothesis/

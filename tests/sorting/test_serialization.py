@@ -4,6 +4,7 @@ import struct
 from pathlib import Path
 
 import pytest
+from hypothesis import given, strategies
 
 from algorithm_playground.core import (
     BinaryFormatError,
@@ -12,6 +13,8 @@ from algorithm_playground.problems.sorting import (
     I32_MAX,
     I32_MIN,
     SortingProblem,
+    read_values,
+    write_values,
 )
 
 
@@ -107,3 +110,50 @@ def test_output_rejects_a_missing_header(
 
     with pytest.raises(BinaryFormatError, match="Unexpected end of stream"):
         problem.deserialize_output(path)
+
+
+I32_VALUES = strategies.lists(strategies.integers(-(2**31), 2**31 - 1))
+
+
+@given(I32_VALUES)
+def test_any_i32_values_are_read_back_from_the_file_unchanged(
+    tmp_path_factory: pytest.TempPathFactory, values: list[int]
+) -> None:
+    """Test every list of i32 values survives a write and a read of the file."""
+    path = tmp_path_factory.mktemp("values") / "values.bin"
+    write_values(values, path)
+
+    assert read_values(path) == values
+
+
+@given(I32_VALUES, strategies.data())
+def test_a_value_file_cut_short_is_a_format_error(
+    tmp_path_factory: pytest.TempPathFactory,
+    values: list[int],
+    data: strategies.DataObject,
+) -> None:
+    """Test a value file that lost any of its bytes cannot be read."""
+    path = tmp_path_factory.mktemp("values") / "values.bin"
+    write_values(values, path)
+    whole = path.read_bytes()
+    path.write_bytes(whole[: data.draw(strategies.integers(0, len(whole) - 1))])
+
+    with pytest.raises(
+        BinaryFormatError, match=r"^Unexpected end of stream|^Declared \d+ i32 values"
+    ):
+        read_values(path)
+
+
+@given(I32_VALUES, strategies.binary(min_size=1))
+def test_bytes_after_the_values_are_a_format_error(
+    tmp_path_factory: pytest.TempPathFactory, values: list[int], extra: bytes
+) -> None:
+    """Test a value file with anything after its values cannot be read."""
+    path = tmp_path_factory.mktemp("values") / "values.bin"
+    write_values(values, path)
+    path.write_bytes(path.read_bytes() + extra)
+
+    with pytest.raises(
+        BinaryFormatError, match=r"^The file has trailing bytes after its last field$"
+    ):
+        read_values(path)

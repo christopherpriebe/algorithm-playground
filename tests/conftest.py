@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 from typing_extensions import override
 
 from algorithm_playground.core import (
@@ -36,6 +37,13 @@ class ExplodingVerificationProblem(SortingProblem):
     def verify(self, input_data: list[int], output: list[int]) -> VerificationResult:
         message = "verifier exploded"
         raise RuntimeError(message)
+
+
+# The suite runs in parallel on every core, so how long one Hypothesis example
+# takes says nothing about the code under test; a deadline would only make the
+# property tests flaky.
+settings.register_profile("suite", deadline=None)
+settings.load_profile("suite")
 
 
 @pytest.fixture

@@ -1,11 +1,13 @@
 """Tests for reading and writing the binary format."""
 
 import io
+import math
 import struct
 from collections.abc import Callable
 from typing import Any, BinaryIO
 
 import pytest
+from hypothesis import given, strategies
 
 from algorithm_playground.core import (
     BinaryFormatError,
@@ -334,3 +336,155 @@ def test_a_body_that_ends_early_raises_from_its_reader() -> None:
 
     with pytest.raises(BinaryFormatError, match="only 4 bytes remain"):
         read_sections(stream, {0: read_numbers})
+
+
+# Each integer type: its name, its range, and how to write and read one value or an array.
+INTEGER_TYPES = {
+    "u8": (0, 2**8 - 1, write_u8, read_u8),
+    "u32": (0, 2**32 - 1, write_u32, read_u32),
+    "u64": (0, 2**64 - 1, write_u64, read_u64),
+    "i32": (-(2**31), 2**31 - 1, write_i32, read_i32),
+    "i64": (-(2**63), 2**63 - 1, write_i64, read_i64),
+}
+INTEGER_ARRAY_TYPES = {
+    "u32": (0, 2**32 - 1, write_u32_array, read_u32_array),
+    "i32": (-(2**31), 2**31 - 1, write_i32_array, read_i32_array),
+    "i64": (-(2**63), 2**63 - 1, write_i64_array, read_i64_array),
+}
+
+
+def f64_bits(value: float) -> bytes:
+    """Return the eight bytes of a float, so that NaNs and signed zeros compare exactly."""
+    return struct.pack("<d", value)
+
+
+@strategies.composite
+def written_scalars(
+    draw: strategies.DrawFn,
+) -> tuple[str, int | float]:
+    """Draw the name of a scalar type and a value that fits it."""
+    name = draw(strategies.sampled_from([*INTEGER_TYPES, "f64"]))
+    if name == "f64":
+        return name, draw(strategies.floats(allow_nan=True, allow_infinity=True))
+    lowest, highest, _, _ = INTEGER_TYPES[name]
+    return name, draw(strategies.integers(lowest, highest))
+
+
+@given(strategies.lists(written_scalars()))
+def test_scalars_written_in_any_order_are_read_back_in_that_order(
+    scalars: list[tuple[str, int | float]],
+) -> None:
+    """Test a stream of mixed scalars reads back value for value and then ends."""
+    stream = io.BytesIO()
+    for name, value in scalars:
+        if name == "f64":
+            write_f64(stream, value)
+        else:
+            INTEGER_TYPES[name][2](stream, int(value))
+    stream.seek(0)
+
+    read_back = [
+        read_f64(stream) if name == "f64" else INTEGER_TYPES[name][3](stream)
+        for name, _ in scalars
+    ]
+
+    assert [
+        f64_bits(value) if name == "f64" else value
+        for (name, _), value in zip(scalars, read_back, strict=True)
+    ] == [f64_bits(value) if name == "f64" else value for name, value in scalars]
+    expect_end_of_stream(stream, "The stream")
+
+
+@given(strategies.sampled_from(list(INTEGER_TYPES)), strategies.data())
+def test_an_integer_outside_its_type_is_refused_before_anything_is_written(
+    name: str, data: strategies.DataObject
+) -> None:
+    """Test writing a value just outside, or far outside, an integer type raises and writes nothing."""
+    lowest, highest, write, _ = INTEGER_TYPES[name]
+    value = data.draw(
+        strategies.one_of(
+            strategies.integers(max_value=lowest - 1),
+            strategies.integers(min_value=highest + 1),
+        )
+    )
+    stream = io.BytesIO()
+
+    with pytest.raises(ValueError, match=f"cannot be written as {name}"):
+        write(stream, value)
+
+    assert stream.getvalue() == b""
+
+
+@given(strategies.sampled_from(list(INTEGER_ARRAY_TYPES)), strategies.data())
+def test_integer_arrays_are_read_back_whole(
+    name: str, data: strategies.DataObject
+) -> None:
+    """Test an integer array reads back unchanged given its length, and nothing is left over."""
+    lowest, highest, write, read = INTEGER_ARRAY_TYPES[name]
+    values = data.draw(strategies.lists(strategies.integers(lowest, highest)))
+    stream = io.BytesIO()
+    write(stream, values)
+    stream.seek(0)
+
+    assert read(stream, len(values)) == values
+    expect_end_of_stream(stream, "The stream")
+
+
+@given(strategies.lists(strategies.floats(allow_nan=True, allow_infinity=True)))
+def test_f64_arrays_are_read_back_bit_for_bit(values: list[float]) -> None:
+    """Test a float array reads back with every bit kept, NaNs and signed zeros included."""
+    stream = io.BytesIO()
+    write_f64_array(stream, values)
+    stream.seek(0)
+
+    read_back = read_f64_array(stream, len(values))
+
+    assert [f64_bits(value) for value in read_back] == [
+        f64_bits(value) for value in values
+    ]
+    assert all(
+        math.isnan(value) == math.isnan(original)
+        for value, original in zip(read_back, values, strict=True)
+    )
+
+
+@given(strategies.sampled_from(list(INTEGER_ARRAY_TYPES)), strategies.data())
+def test_an_array_names_the_first_value_outside_its_type(
+    name: str, data: strategies.DataObject
+) -> None:
+    """Test the error for an array names the index of its first out-of-range value."""
+    lowest, highest, write, _ = INTEGER_ARRAY_TYPES[name]
+    fitting = strategies.integers(lowest, highest)
+    outside = strategies.one_of(
+        strategies.integers(max_value=lowest - 1),
+        strategies.integers(min_value=highest + 1),
+    )
+    before = data.draw(strategies.lists(fitting))
+    after = data.draw(strategies.lists(strategies.one_of(fitting, outside)))
+    values = [*before, data.draw(outside), *after]
+
+    with pytest.raises(
+        ValueError, match=rf"^Value at index {len(before)} is out of {name} range"
+    ):
+        write(io.BytesIO(), values)
+
+
+@given(
+    strategies.sampled_from(list(INTEGER_ARRAY_TYPES)),
+    strategies.data(),
+)
+def test_an_array_cut_short_is_a_format_error(
+    name: str, data: strategies.DataObject
+) -> None:
+    """Test reading an array from a stream that lost some of its bytes raises a format error."""
+    lowest, highest, write, read = INTEGER_ARRAY_TYPES[name]
+    values = data.draw(
+        strategies.lists(strategies.integers(lowest, highest), min_size=1)
+    )
+    stream = io.BytesIO()
+    write(stream, values)
+    whole = stream.getvalue()
+    kept = data.draw(strategies.integers(0, len(whole) - 1))
+
+    with pytest.raises(BinaryFormatError, match=f"{len(values)} {name} values"):
+        read(io.BytesIO(whole[:kept]), len(values))

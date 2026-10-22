@@ -54,6 +54,7 @@ typecheck = [
     { include-group = "docs" },
 ]
 test = [
+    "hypothesis>=6.120",
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "pytest-xdist>=3.8",

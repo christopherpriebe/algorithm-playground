@@ -1,9 +1,11 @@
 """Tests for how inputs, outputs, errors, and failures are described."""
 
+import re
 from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 import pytest
+from hypothesis import given, strategies
 from typing_extensions import override
 
 from algorithm_playground.core import (
@@ -463,3 +465,53 @@ def test_shrinking_keeps_the_category_the_verifier_named() -> None:
     # Inputs of five values or fewer fail too, as "not sorted": not the same way.
     assert outcome.shrunk is not None
     assert len(outcome.shrunk.case.input_data) == 6
+
+
+@given(strategies.text(), strategies.integers(-5, 100))
+def test_truncated_text_fits_the_limit_and_keeps_the_start(
+    text: str, limit: int
+) -> None:
+    """Test truncate_text never exceeds the limit and returns the start of the text."""
+    marker = "..."
+    shortened = truncate_text(text, limit)
+
+    assert len(shortened) <= max(limit, 0)
+    if len(text) <= limit:
+        assert shortened == text
+    else:
+        start = shortened.removesuffix(marker) if limit > len(marker) else shortened
+        assert text.startswith(start)
+
+
+@given(
+    strategies.lists(strategies.integers()),
+    strategies.integers(0, 120),
+    strategies.one_of(strategies.none(), strategies.integers(-5, 300)),
+)
+def test_a_described_sequence_fits_the_limit(
+    values: list[int], limit: int, focus: int | None
+) -> None:
+    """Test describe_sequence never writes more than the limit, and shows a fitting sequence whole."""
+    text = describe_sequence(values, limit, focus)
+    whole = f"[{', '.join(repr(value) for value in values)}]"
+
+    assert len(text) <= limit
+    if len(whole) <= limit:
+        assert text == whole
+
+
+@given(
+    strategies.lists(strategies.integers(), min_size=1),
+    strategies.integers(0, 120),
+    strategies.integers(-5, 300),
+)
+def test_a_described_window_contains_the_focus(
+    values: list[int], limit: int, focus: int
+) -> None:
+    """Test the indices a window says it shows include the focus, moved into the sequence."""
+    text = describe_sequence(values, limit, focus)
+    shown = re.search(r"indices (\d+) to (\d+) shown", text)
+
+    if shown is not None:
+        position = min(max(focus, 0), len(values) - 1)
+        assert int(shown.group(1)) <= position <= int(shown.group(2))

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import pytest
+from hypothesis import given, strategies
 
 from algorithm_playground.core import (
     deduplicate_candidates,
@@ -264,3 +265,109 @@ def test_each_candidate_is_offered_once_and_the_input_never() -> None:
 def test_it_is_lazy() -> None:
     """Test candidates are produced on demand, so an endless source does not hang."""
     assert next(deduplicate_candidates(generate_endlessly())) == [0]
+
+
+INTEGER_LISTS = strategies.lists(strategies.integers(), max_size=20)
+
+
+def is_subsequence(candidate: list[int], values: list[int]) -> bool:
+    """Tell whether ``candidate`` is ``values`` with some elements left out, in order."""
+    remaining = iter(values)
+    return all(any(element == value for value in remaining) for element in candidate)
+
+
+@given(INTEGER_LISTS, strategies.integers(0, 25))
+def test_shrinking_a_sequence_only_leaves_elements_out(
+    values: list[int], minimum_length: int
+) -> None:
+    """Test every candidate is shorter, keeps the order, and respects the minimum length."""
+    candidates = list(shrink_sequence(values, minimum_length=minimum_length))
+
+    assert all(isinstance(candidate, list) for candidate in candidates)
+    assert all(
+        minimum_length <= len(candidate) < len(values) for candidate in candidates
+    )
+    assert all(is_subsequence(candidate, values) for candidate in candidates)
+
+
+@given(INTEGER_LISTS)
+def test_shrinking_a_sequence_offers_every_single_removal(values: list[int]) -> None:
+    """Test the candidates include the sequence without each one of its elements."""
+    candidates = list(shrink_sequence(values))
+
+    assert all(
+        [*values[:position], *values[position + 1 :]] in candidates
+        for position in range(len(values))
+    )
+
+
+@given(strategies.integers())
+def test_a_shrunk_integer_is_closer_to_zero_on_the_same_side(value: int) -> None:
+    """Test every candidate for a number is new, nearer zero, and not of the opposite sign."""
+    candidates = list(shrink_integer(value))
+
+    assert len(set(candidates)) == len(candidates)
+    assert all(abs(candidate) < abs(value) for candidate in candidates)
+    assert all(candidate * value >= 0 for candidate in candidates)
+
+
+@given(INTEGER_LISTS)
+def test_simpler_integers_keep_the_length_and_differ_from_the_input(
+    values: list[int],
+) -> None:
+    """Test every candidate of shrink_integers has the input's length and is not the input."""
+    candidates = list(shrink_integers(values))
+
+    assert all(len(candidate) == len(values) for candidate in candidates)
+    assert values not in candidates
+
+
+@given(INTEGER_LISTS)
+def test_an_integer_sequence_never_offers_the_input_or_a_repeat(
+    values: list[int],
+) -> None:
+    """Test shrink_integer_sequence yields no candidate twice and never the input itself."""
+    candidates = [tuple(candidate) for candidate in shrink_integer_sequence(values)]
+
+    assert len(set(candidates)) == len(candidates)
+    assert tuple(values) not in candidates
+    assert all(len(candidate) <= len(values) for candidate in candidates)
+
+
+@given(INTEGER_LISTS)
+def test_shrinking_each_element_changes_exactly_one_position(
+    values: list[int],
+) -> None:
+    """Test every candidate of shrink_each replaces one element with one of its candidates."""
+    for candidate in shrink_each(values, shrink_integer):
+        changed = [
+            position
+            for position, (old, new) in enumerate(zip(values, candidate, strict=True))
+            if old != new
+        ]
+        assert len(changed) == 1
+        assert candidate[changed[0]] in list(shrink_integer(values[changed[0]]))
+
+
+@given(strategies.tuples(strategies.integers(), strategies.integers()))
+def test_shrinking_fields_changes_one_field_at_a_time(pair: tuple[int, int]) -> None:
+    """Test every candidate of shrink_fields differs from the tuple in exactly one field."""
+    candidates = list(shrink_fields(pair, {0: shrink_integer, 1: shrink_integer}))
+
+    assert all(
+        sum(old != new for old, new in zip(pair, candidate, strict=True)) == 1
+        for candidate in candidates
+    )
+    assert len(candidates) == len(list(shrink_integer(pair[0]))) + len(
+        list(shrink_integer(pair[1]))
+    )
+
+
+@given(INTEGER_LISTS, INTEGER_LISTS)
+def test_deduplicated_candidates_are_the_first_of_each_new_value_in_order(
+    candidates: list[int], excluded: list[int]
+) -> None:
+    """Test deduplicate_candidates keeps each new candidate once, in order, without the excluded."""
+    expected = list(dict.fromkeys(item for item in candidates if item not in excluded))
+
+    assert list(deduplicate_candidates(candidates, *excluded)) == expected
