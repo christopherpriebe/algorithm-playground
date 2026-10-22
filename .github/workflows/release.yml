@@ -1,0 +1,54 @@
+# Builds and publishes to PyPI when a v* tag is pushed. This is the only
+# workflow in the repo; day-to-day checks run locally with nox.
+#
+# One-time setup: on PyPI, add a trusted publisher for this repository with
+# workflow "release.yml" and environment "pypi".
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Tag matches project version
+        if: github.ref_type == 'tag'
+        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
+
+  build:
+    needs: check-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-pure
+          path: dist
+
+  publish:
+    needs: [build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/algorithm-playground
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - uses: astral-sh/setup-uv@v10.3.0
+      - run: uv publish --trusted-publishing always dist/*
