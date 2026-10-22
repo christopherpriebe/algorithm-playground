@@ -28,7 +28,9 @@ RATIO = re.compile(r"\((\d+\.\d+)x\)")
 SLOW_SORTER_SECONDS = 1.0
 
 
-def invoke_comparison(*arguments: str, sizes: str = "4,50") -> Result:
+def invoke_comparison(
+    *arguments: str, sizes: str = "4,50", warmup: str = "0"
+) -> Result:
     """Benchmark the implementations with one repetition per size and no plot."""
     return invoke_cli(
         "benchmark",
@@ -39,7 +41,7 @@ def invoke_comparison(*arguments: str, sizes: str = "4,50") -> Result:
         "--repetitions",
         "1",
         "--warmup",
-        "0",
+        warmup,
         "--no-plot",
     )
 
@@ -83,10 +85,15 @@ def test_a_slower_implementation_is_reported_slower_than_the_reference(
     sorters: dict[str, Path],
 ) -> None:
     """Test a real sorter that waits is reported with a ratio above one to a quick one."""
-    # The ratio arithmetic is tested with exact durations in
-    # test_cli_benchmark_distributions.py; this checks the wiring with real processes. One
-    # size keeps the slow sorter to two runs, and its wait dwarfs any scheduling delay.
-    result = invoke_comparison(str(sorters["fast"]), str(sorters["slow"]), sizes="4")
+    # The ratio arithmetic is tested with exact durations by the fake-runner tests in
+    # this file; this checks the wiring with real processes. The first launch of a newly
+    # written script is not timed: the system checks a new executable before it starts,
+    # which takes hundreds of milliseconds when the suite writes many of them at once
+    # and would land on whichever sorter starts first. With that warmup run and one
+    # size, the slow sorter's wait dwarfs any scheduling delay.
+    result = invoke_comparison(
+        str(sorters["fast"]), str(sorters["slow"]), sizes="4", warmup="1"
+    )
 
     assert result.exit_code == 0, result.stdout
     assert "ratio to fast.py" in result.stdout
