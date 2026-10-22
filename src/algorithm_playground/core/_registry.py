@@ -223,7 +223,7 @@ class ProblemSourceKind(Enum):
     DIRECT = "direct"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ProblemSource:
     """Where a problem was registered from.
 
@@ -244,7 +244,7 @@ class ProblemSource:
         return f"{self.kind.value}: {self.detail}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RegistrySnapshot:
     """A copy of the registry taken by :func:`snapshot_registry`."""
 
@@ -289,7 +289,7 @@ def register_problem(cls: type[ProblemSubclass]) -> type[ProblemSubclass]:
     if name not in _REGISTRY:
         built_in = cls.__module__.startswith(_BUILT_IN_PREFIX)
         kind = ProblemSourceKind.BUILT_IN if built_in else ProblemSourceKind.DIRECT
-        _SOURCES[name] = ProblemSource(kind)
+        _SOURCES[name] = ProblemSource(kind=kind)
     _REGISTRY[name] = cls
     return cls
 
@@ -343,7 +343,7 @@ def snapshot_registry() -> RegistrySnapshot:
     Returns:
         The copy.
     """
-    return RegistrySnapshot(dict(_REGISTRY), dict(_SOURCES))
+    return RegistrySnapshot(problems=dict(_REGISTRY), sources=dict(_SOURCES))
 
 
 def restore_registry(snapshot: RegistrySnapshot) -> None:
@@ -401,7 +401,7 @@ def load_problem_modules(
             # Importing runs the code of a plugin, so any exception becomes a load error.
             _forget_new_problems(before)
             raise ProblemLoadError(_load_failure_message(module_name, error)) from error
-        _label_new_problems(before, ProblemSource(kind, module_name))
+        _label_new_problems(before, ProblemSource(kind=kind, detail=module_name))
         if freshly_imported and set(_REGISTRY) == before:
             warnings.append(
                 f"Problem module '{module_name}' registered no problems. Did you forget "
@@ -459,6 +459,7 @@ def load_entry_point_problems(
             )
             continue
         _label_new_problems(
-            before, ProblemSource(ProblemSourceKind.ENTRY_POINT, entry_point.name)
+            before,
+            ProblemSource(kind=ProblemSourceKind.ENTRY_POINT, detail=entry_point.name),
         )
     return tuple(warnings)

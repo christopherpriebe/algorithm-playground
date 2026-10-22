@@ -9,7 +9,11 @@ from algorithm_playground.core import Frame, FrameSequence, StateTimeline
 
 def build_numbered_frame(position: int) -> Frame:
     """Build the frame whose body, caption and highlight are derived from its position."""
-    return Frame(f"body {position}", f"caption {position}", (position,))
+    return Frame(
+        f"body {position}",
+        caption=f"caption {position}",
+        highlighted_indices=(position,),
+    )
 
 
 def add_all(total: int, events: Sequence[int]) -> int:
@@ -35,7 +39,7 @@ def test_has_the_given_length_and_builds_frames_by_position() -> None:
     frames = FrameSequence(4, build_numbered_frame)
 
     assert len(frames) == 4
-    assert frames[2] == Frame("body 2", "caption 2", (2,))
+    assert frames[2] == Frame("body 2", caption="caption 2", highlighted_indices=(2,))
     assert frames[-1] == build_numbered_frame(3)
 
 

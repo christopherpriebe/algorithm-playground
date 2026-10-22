@@ -201,6 +201,76 @@ def test_every_exported_dataclass_is_a_frozen_slotted_value(value_type: type) ->
     assert "__slots__" in vars(value_type)
 
 
+# How many leading fields of each exported dataclass may be passed by position.
+# Every other field is keyword-only, so its order is not part of the API.
+POSITIONAL_FIELD_COUNTS = {
+    "BarHighlight": 1,
+    "BenchmarkFailure": 0,
+    "BenchmarkProgress": 0,
+    "BenchmarkReport": 0,
+    "BenchmarkSettings": 0,
+    "Case": 2,
+    "CaseOutcome": 0,
+    "CasePlan": 0,
+    "CaseProgress": 0,
+    "ChartSeries": 0,
+    "CommandDependencies": 0,
+    "Configuration": 0,
+    "ConfiguredImplementation": 0,
+    "FailureDetail": 0,
+    "Fixture": 2,
+    "FixtureOrigin": 1,
+    "Frame": 1,
+    "GeneratedOrigin": 0,
+    "Growth": 0,
+    "Implementation": 2,
+    "ImplementationBenchmark": 0,
+    "InputGenerator": 1,
+    "KeyPress": 1,
+    "OperationIssue": 0,
+    "ProblemSource": 0,
+    "RegistrySnapshot": 0,
+    "RunResult": 0,
+    "SavedInputs": 0,
+    "ShrinkOptions": 0,
+    "ShrunkFailure": 0,
+    "ShrunkOrigin": 1,
+    "SingleRun": 0,
+    "SizeMeasurement": 0,
+    "SortingEvent": 3,
+    "SortingTrace": 1,
+    "StepperOptions": 0,
+    "StepperState": 0,
+    "TestReport": 0,
+    "TestRunOptions": 0,
+    "TestSettings": 0,
+    "TimingSummary": 1,
+    "VerificationResult": 1,
+}
+
+
+def test_every_exported_dataclass_has_a_positional_field_count() -> None:
+    """Test a newly exported dataclass gets a decision on which fields are positional."""
+    assert {value_type.__name__ for value_type in exported_dataclasses()} == set(
+        POSITIONAL_FIELD_COUNTS
+    )
+
+
+@pytest.mark.parametrize(
+    "value_type", exported_dataclasses(), ids=lambda value_type: value_type.__name__
+)
+def test_only_the_leading_fields_of_an_exported_dataclass_are_positional(
+    value_type: type,
+) -> None:
+    """Test every field after the allowed leading ones must be passed by keyword."""
+    parameters = list(inspect.signature(value_type).parameters.values())
+    count = POSITIONAL_FIELD_COUNTS.get(value_type.__name__, 0)
+
+    assert [parameter.kind for parameter in parameters] == [
+        inspect.Parameter.POSITIONAL_OR_KEYWORD
+    ] * count + [inspect.Parameter.KEYWORD_ONLY] * (len(parameters) - count)
+
+
 @pytest.mark.parametrize(
     "name",
     [

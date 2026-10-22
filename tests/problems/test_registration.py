@@ -131,8 +131,10 @@ def build_snapshot_without(name: str) -> RegistrySnapshot:
     """Build a snapshot of the registry as it is, minus the problem called ``name``."""
     snapshot = snapshot_registry()
     return RegistrySnapshot(
-        {key: value for key, value in snapshot.problems.items() if key != name},
-        {key: value for key, value in snapshot.sources.items() if key != name},
+        problems={
+            key: value for key, value in snapshot.problems.items() if key != name
+        },
+        sources={key: value for key, value in snapshot.sources.items() if key != name},
     )
 
 
@@ -310,7 +312,7 @@ def test_problem_descriptions_maps_sorted_names_to_descriptions() -> None:
 def test_built_in_problems_are_labeled_built_in() -> None:
     """Test the sorting problem is recorded as built in."""
     assert list_problem_sources()["sorting"] == ProblemSource(
-        ProblemSourceKind.BUILT_IN
+        kind=ProblemSourceKind.BUILT_IN
     )
 
 
@@ -331,17 +333,20 @@ def test_sources_are_keyed_by_sorted_name() -> None:
 @pytest.mark.parametrize(
     ("source", "text"),
     [
-        (ProblemSource(ProblemSourceKind.BUILT_IN), "built-in"),
-        (ProblemSource(ProblemSourceKind.DIRECT), "registered in code"),
+        (ProblemSource(kind=ProblemSourceKind.BUILT_IN), "built-in"),
+        (ProblemSource(kind=ProblemSourceKind.DIRECT), "registered in code"),
         (
-            ProblemSource(ProblemSourceKind.ENTRY_POINT, "graphs"),
+            ProblemSource(kind=ProblemSourceKind.ENTRY_POINT, detail="graphs"),
             "entry point: graphs",
         ),
         (
-            ProblemSource(ProblemSourceKind.CONFIGURATION, "pkg.mod"),
+            ProblemSource(kind=ProblemSourceKind.CONFIGURATION, detail="pkg.mod"),
             "configuration: pkg.mod",
         ),
-        (ProblemSource(ProblemSourceKind.OPTION, "pkg.mod"), "option: pkg.mod"),
+        (
+            ProblemSource(kind=ProblemSourceKind.OPTION, detail="pkg.mod"),
+            "option: pkg.mod",
+        ),
     ],
     ids=["built-in", "direct", "entry-point", "configuration", "option"],
 )
@@ -360,7 +365,7 @@ def test_importing_a_module_registers_its_problems_with_the_given_source(
 
     assert "variant-one" in list_problems()
     assert list_problem_sources()["variant-one"] == ProblemSource(
-        ProblemSourceKind.CONFIGURATION, module
+        kind=ProblemSourceKind.CONFIGURATION, detail=module
     )
 
 
@@ -493,7 +498,7 @@ def test_a_python_file_is_loaded_by_its_path(
     load_problem_modules([str(path)], ProblemSourceKind.OPTION)
 
     assert list_problem_sources()["file-variant"] == ProblemSource(
-        ProblemSourceKind.OPTION, str(path)
+        kind=ProblemSourceKind.OPTION, detail=str(path)
     )
 
 
@@ -682,7 +687,7 @@ def test_a_module_entry_point_is_imported_and_labeled(
 
     assert warnings == ()
     assert list_problem_sources()["entry-variant"] == ProblemSource(
-        ProblemSourceKind.ENTRY_POINT, "my-entry"
+        kind=ProblemSourceKind.ENTRY_POINT, detail="my-entry"
     )
 
 

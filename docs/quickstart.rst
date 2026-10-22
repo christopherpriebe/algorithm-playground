@@ -61,7 +61,7 @@ that ``debug --input-file`` can step through:
 
    $ uv run algorithm-playground test sorting my_sort.py --save-failing-inputs failures
    $ uv run algorithm-playground debug sorting my_sort.py \
-       --input-file failures/my_sort.py/generated_uniform_size=9_seed=1150936189/shrunk-input.bin
+       --input-file failures/my_sort.py/generated_uniform_size=9_seed=1150936189-045d4fda/shrunk-input.bin
 
 Benchmark with a reproducible seed
 ----------------------------------

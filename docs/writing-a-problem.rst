@@ -176,7 +176,8 @@ Checking the problem
 --------------------
 
 Add a test next to the problem. ``assert_valid_problem`` runs the checks
-described in :doc:`extending`: fixture and generator names, determinism of the
+described in :doc:`extending`: duplicate fixture and generator names (an empty or
+unusable name is rejected when the fixture or generator is constructed), determinism of the
 generators for a fixed seed, the smallest size, serialization of every input,
 whether ``deserialize_input`` reads back what was written, whether
 ``expected_output`` passes ``verify``, whether the fixtures and generated inputs

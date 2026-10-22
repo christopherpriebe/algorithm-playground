@@ -55,7 +55,7 @@ def _try_write_input(problem: AnyProblem, input_data: object, path: Path) -> str
     return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SavedInputs:
     """Where the failing inputs of a test report were saved.
 
@@ -158,4 +158,4 @@ def save_failing_inputs(
                 saved_paths[key] = path
             else:
                 errors.append(error)
-    return SavedInputs(inputs, shrunk_inputs, tuple(errors))
+    return SavedInputs(inputs=inputs, shrunk_inputs=shrunk_inputs, errors=tuple(errors))

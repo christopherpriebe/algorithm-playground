@@ -481,10 +481,22 @@ def sample_report() -> TestReport:
     """A report of one passing and one failing implementation on a single fixture case."""
     case = Case(FixtureOrigin("case"), [])
     outcomes = (
-        CaseOutcome(case, "a", CaseStatus.PASSED, ""),
-        CaseOutcome(case, "b", CaseStatus.FAILED, "wrong"),
+        CaseOutcome(
+            case=case, implementation_name="a", status=CaseStatus.PASSED, message=""
+        ),
+        CaseOutcome(
+            case=case,
+            implementation_name="b",
+            status=CaseStatus.FAILED,
+            message="wrong",
+        ),
     )
-    return TestReport("sorting", ("a", "b"), (case,), outcomes)
+    return TestReport(
+        problem_name="sorting",
+        implementation_names=("a", "b"),
+        cases=(case,),
+        outcomes=outcomes,
+    )
 
 
 def test_outcome_lookup(sample_report: TestReport) -> None:
@@ -498,10 +510,18 @@ def test_lookups_do_not_scan_the_outcomes() -> None:
     """Test looking up outcomes repeatedly iterates over the outcomes at most once."""
     case = Case(FixtureOrigin("case"), [])
     outcomes = IterationCountingTuple(
-        CaseOutcome(case, name, CaseStatus.PASSED, "") for name in ("a", "b", "c")
+        CaseOutcome(
+            case=case, implementation_name=name, status=CaseStatus.PASSED, message=""
+        )
+        for name in ("a", "b", "c")
     )
     IterationCountingTuple.iterations = 0
-    report = TestReport("sorting", ("a", "b", "c"), (case,), outcomes)
+    report = TestReport(
+        problem_name="sorting",
+        implementation_names=("a", "b", "c"),
+        cases=(case,),
+        outcomes=outcomes,
+    )
 
     for _ in range(100):
         assert report.outcome("fixture:case", "c").implementation_name == "c"

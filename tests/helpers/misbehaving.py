@@ -79,17 +79,23 @@ class FaultyProblem(Problem[list[int], int, None]):
         if self.fault == "fixtures":
             message = "fixtures exploded"
             raise RuntimeError(message)
-        yield Fixture("one", [1], "a [red]fixture[/red] description")
+        yield Fixture("one", [1], description="a [red]fixture[/red] description")
 
     @override
     def generators(self) -> Sequence[InputGenerator[list[int]]]:
         if self.fault == "generators":
             message = "generators exploded"
             raise RuntimeError(message)
-        generators = [InputGenerator("uniform", "uniform values", generate_uniform)]
+        generators = [
+            InputGenerator(
+                "uniform", description="uniform values", generate=generate_uniform
+            )
+        ]
         if self.fault == "generator":
             generators.append(
-                InputGenerator("broken", "always raises", generate_broken)
+                InputGenerator(
+                    "broken", description="always raises", generate=generate_broken
+                )
             )
         return generators
 
@@ -100,7 +106,7 @@ class FaultyProblem(Problem[list[int], int, None]):
             raise RuntimeError(message)
         expected = len(set(input_data))
         return VerificationResult(
-            output == expected, f"expected {expected}, got {output}"
+            output == expected, message=f"expected {expected}, got {output}"
         )
 
     @override

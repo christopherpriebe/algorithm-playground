@@ -167,13 +167,13 @@ def test_a_single_key_decodes_to_its_key(data: bytes, key: Key) -> None:
         ("Next", KeyPress(Key.NEXT)),
         ("p", KeyPress(Key.PREVIOUS)),
         ("g", KeyPress(Key.JUMP)),
-        ("g 12", KeyPress(Key.JUMP, "12")),
-        ("  jump   7 ", KeyPress(Key.JUMP, "7")),
+        ("g 12", KeyPress(Key.JUMP, argument="12")),
+        ("  jump   7 ", KeyPress(Key.JUMP, argument="7")),
         ("pause", KeyPress(Key.TOGGLE_PLAYBACK)),
         ("space", KeyPress(Key.TOGGLE_PLAYBACK)),
         ("q", KeyPress(Key.QUIT)),
         ("exit", KeyPress(Key.QUIT)),
-        ("zzz", KeyPress(Key.UNKNOWN, "zzz")),
+        ("zzz", KeyPress(Key.UNKNOWN, argument="zzz")),
     ],
 )
 def test_a_command_typed_on_a_line_decodes_to_its_key_press(
@@ -189,7 +189,14 @@ def test_reads_one_command_per_line_and_quits_at_the_end() -> None:
 
     presses = [source.read_key(None) for _ in range(6)]
 
-    assert presses == [NEXT, PREVIOUS, KeyPress(Key.JUMP, "3"), NEXT, QUIT, QUIT]
+    assert presses == [
+        NEXT,
+        PREVIOUS,
+        KeyPress(Key.JUMP, argument="3"),
+        NEXT,
+        QUIT,
+        QUIT,
+    ]
 
 
 def test_asking_for_a_line_returns_the_line_typed() -> None:
@@ -346,7 +353,7 @@ def test_one_key_gives_one_unknown_press(
 
     presses = collect_presses(master, source, typed)
 
-    assert presses == [KeyPress(Key.UNKNOWN, shown)]
+    assert presses == [KeyPress(Key.UNKNOWN, argument=shown)]
 
 
 @posix_terminal
@@ -372,7 +379,9 @@ def test_a_long_paste_is_shortened_in_the_message(
 
     presses = collect_presses(master, source, b"\x1b[200~" + b"x" * 100 + b"\x1b[201~")
 
-    assert presses == [KeyPress(Key.UNKNOWN, "pasted text " + "x" * 20 + "...")]
+    assert presses == [
+        KeyPress(Key.UNKNOWN, argument="pasted text " + "x" * 20 + "...")
+    ]
 
 
 @posix_terminal

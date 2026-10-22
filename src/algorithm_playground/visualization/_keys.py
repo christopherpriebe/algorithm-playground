@@ -16,7 +16,7 @@ import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from enum import Enum
 from types import ModuleType
 from typing import Protocol, Self, TextIO
@@ -173,6 +173,7 @@ class KeyPress:
     """
 
     key: Key
+    _: KW_ONLY
     argument: str | None = None
 
 
@@ -295,7 +296,7 @@ class TerminalKeySource:
             data += _read_escape_sequence(descriptor)
             if data == PASTE_START:
                 return KeyPress(
-                    Key.UNKNOWN, f"pasted text {_read_paste_text(descriptor)}"
+                    Key.UNKNOWN, argument=f"pasted text {_read_paste_text(descriptor)}"
                 )
             return decode_key(data)
         if data[0] >= UTF8_MULTI_BYTE_LEAD_MINIMUM:
@@ -345,7 +346,7 @@ def decode_key(data: bytes) -> KeyPress:
         return KeyPress(Key.TOGGLE_PLAYBACK)
     if data in (b"q", b"Q", b"\x03", b"\x04"):
         return KeyPress(Key.QUIT)
-    return KeyPress(Key.UNKNOWN, data.decode("utf-8", errors="replace"))
+    return KeyPress(Key.UNKNOWN, argument=data.decode("utf-8", errors="replace"))
 
 
 def decode_line(line: str) -> KeyPress:
@@ -365,12 +366,12 @@ def decode_line(line: str) -> KeyPress:
     if word in ("p", "previous"):
         return KeyPress(Key.PREVIOUS)
     if word in ("g", "jump"):
-        return KeyPress(Key.JUMP, argument.strip() or None)
+        return KeyPress(Key.JUMP, argument=argument.strip() or None)
     if word in ("pause", "play", "resume", "space"):
         return KeyPress(Key.TOGGLE_PLAYBACK)
     if word in ("q", "quit", "exit"):
         return KeyPress(Key.QUIT)
-    return KeyPress(Key.UNKNOWN, text)
+    return KeyPress(Key.UNKNOWN, argument=text)
 
 
 @contextmanager

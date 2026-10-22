@@ -78,8 +78,10 @@ class TwoGeneratorProblem(Problem[list[int], list[int], None]):
     @override
     def generators(self) -> Sequence[InputGenerator[list[int]]]:
         return (
-            InputGenerator("random", "random values", generate_random_values),
-            InputGenerator("zeros", "all zeros", generate_zeros),
+            InputGenerator(
+                "random", description="random values", generate=generate_random_values
+            ),
+            InputGenerator("zeros", description="all zeros", generate=generate_zeros),
         )
 
     @override
@@ -105,7 +107,7 @@ class NeedsThreeProblem(TwoGeneratorProblem):
 
     @override
     def fixtures(self) -> Iterator[Fixture[list[int]]]:
-        yield Fixture("three", [3, 2, 1], "the smallest reversed input")
+        yield Fixture("three", [3, 2, 1], description="the smallest reversed input")
 
 
 class ExplodingFixturesProblem(TwoGeneratorProblem):
@@ -139,8 +141,10 @@ class ExplodingGeneratorProblem(TwoGeneratorProblem):
     @override
     def generators(self) -> Sequence[InputGenerator[list[int]]]:
         return (
-            InputGenerator("fine", "works", generate_zeros),
-            InputGenerator("broken", "raises", generate_by_raising),
+            InputGenerator("fine", description="works", generate=generate_zeros),
+            InputGenerator(
+                "broken", description="raises", generate=generate_by_raising
+            ),
         )
 
 
@@ -165,7 +169,9 @@ def build_many_generator_problem(generator_count: int) -> TwoGeneratorProblem:
         @override
         def generators(self) -> Sequence[InputGenerator[list[int]]]:
             return tuple(
-                InputGenerator(f"g{number}", "zeros", generate_zeros)
+                InputGenerator(
+                    f"g{number}", description="zeros", generate=generate_zeros
+                )
                 for number in range(generator_count)
             )
 
@@ -183,7 +189,7 @@ def problem() -> TwoGeneratorProblem:
     [
         (FixtureOrigin("empty"), "fixture:empty"),
         (
-            GeneratedOrigin("nearly_sorted", 1234567, 37),
+            GeneratedOrigin(generator_name="nearly_sorted", seed=1234567, size=37),
             "generated:nearly_sorted:size=37:seed=1234567",
         ),
         (ShrunkOrigin("fixture:empty"), "shrunk:fixture:empty"),
@@ -200,9 +206,9 @@ def test_origins_print_stable_identifiers(origin: CaseOrigin, identifier: str) -
     [
         FixtureOrigin("empty"),
         FixtureOrigin("name:with:colons"),
-        GeneratedOrigin("nearly_sorted", 1234567, 37),
-        GeneratedOrigin("uniform", 0, 0),
-        GeneratedOrigin("uniform", -5, 3),
+        GeneratedOrigin(generator_name="nearly_sorted", seed=1234567, size=37),
+        GeneratedOrigin(generator_name="uniform", seed=0, size=0),
+        GeneratedOrigin(generator_name="uniform", seed=-5, size=3),
     ],
     ids=[
         "fixture",
@@ -325,7 +331,7 @@ def test_uses_a_random_generator_seeded_with_the_seed(
 
     expected = random.Random(7)  # noqa: S311  seeded generator for reproducible inputs, not cryptography
     assert case.input_data == [expected.randrange(100) for _ in range(5)]
-    assert case.origin == GeneratedOrigin("random", 7, 5)
+    assert case.origin == GeneratedOrigin(generator_name="random", seed=7, size=5)
 
 
 def test_rejects_a_negative_size(problem: TwoGeneratorProblem) -> None:

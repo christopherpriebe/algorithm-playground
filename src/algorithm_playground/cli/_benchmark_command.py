@@ -161,11 +161,13 @@ def _include_failures(
     """
     failures = {
         **{
-            name: BenchmarkFailure(FailureStage.BUILD, str(error))
+            name: BenchmarkFailure(stage=FailureStage.BUILD, message=str(error))
             for name, error in outcome.failures.items()
         },
         **{
-            name: BenchmarkFailure(FailureStage.CANNOT_RUN, f"Cannot run: {reason}")
+            name: BenchmarkFailure(
+                stage=FailureStage.CANNOT_RUN, message=f"Cannot run: {reason}"
+            )
             for name, reason in outcome.unrunnable.items()
         },
     }

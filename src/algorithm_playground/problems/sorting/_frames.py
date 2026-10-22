@@ -136,21 +136,21 @@ def _event_frames(start: tuple[int, ...], events: EventLog) -> FrameSequence:
             body = visualization.render_bar_chart(
                 heights, title=title, height=CHART_HEIGHT
             )
-            return Frame(body, f"start: {event_count} events follow\n{totals}")
+            return Frame(body, caption=f"start: {event_count} events follow\n{totals}")
         event = events[position - 1]
         color, label = EVENT_COLORS[event.event_type]
         indices = tuple(sorted(set(event.indices())))
         body = visualization.render_bar_chart(
             heights,
             title=title,
-            highlights=(BarHighlight(indices, color, label),),
+            highlights=(BarHighlight(indices, color=color, label=label),),
             height=CHART_HEIGHT,
         )
         return Frame(
             body,
-            f"event {position} / {event_count}: {event.describe()}\n"
+            caption=f"event {position} / {event_count}: {event.describe()}\n"
             f"values now: {_describe_values(values, indices)}\n{totals}",
-            indices,
+            highlighted_indices=indices,
         )
 
     return FrameSequence(event_count + 1, _build_frame)
@@ -170,7 +170,9 @@ def _snapshot_frames(trace: SortingTrace) -> FrameSequence:
         title = f"snapshot {position + 1} / {len(snapshots)} (bar height = rank)"
         changed = _find_changed_indices(snapshots, position)
         highlights = (
-            (BarHighlight(changed, CHANGED_COLOR, "changed"),) if changed else ()
+            (BarHighlight(changed, color=CHANGED_COLOR, label="changed"),)
+            if changed
+            else ()
         )
         body = visualization.render_bar_chart(
             _rank_heights(distinct_values, values),
@@ -178,7 +180,11 @@ def _snapshot_frames(trace: SortingTrace) -> FrameSequence:
             highlights=highlights,
             height=CHART_HEIGHT,
         )
-        return Frame(body, _describe_snapshot(position, values, changed), changed)
+        return Frame(
+            body,
+            caption=_describe_snapshot(position, values, changed),
+            highlighted_indices=changed,
+        )
 
     return FrameSequence(len(snapshots), _build_frame)
 

@@ -274,12 +274,22 @@ def test_failed_implementation_record(document: dict[str, Any]) -> None:
 def test_a_failure_in_one_distribution_names_it() -> None:
     """Test a measurement failure records its stage, distribution, size and message."""
     implementation = Implementation(name="a", command=("./a",))
-    failure = BenchmarkFailure(FailureStage.MEASUREMENT, "it broke", "sorted", 10)
+    failure = BenchmarkFailure(
+        stage=FailureStage.MEASUREMENT,
+        message="it broke",
+        distribution="sorted",
+        size=10,
+    )
     report = BenchmarkReport(
         problem_name="sorting",
         settings=SETTINGS,
         implementations=(
-            ImplementationBenchmark(implementation, None, (), (failure,)),
+            ImplementationBenchmark(
+                implementation=implementation,
+                startup=None,
+                measurements=(),
+                failures=(failure,),
+            ),
         ),
     )
 
@@ -301,7 +311,13 @@ def test_the_effective_settings_of_an_implementation_are_recorded() -> None:
         name="a", command=("./a",), inherit_environment=True, timeout_seconds=5.0
     )
     report = BenchmarkReport(
-        "sorting", SETTINGS, (ImplementationBenchmark(implementation, None, ()),)
+        problem_name="sorting",
+        settings=SETTINGS,
+        implementations=(
+            ImplementationBenchmark(
+                implementation=implementation, startup=None, measurements=()
+            ),
+        ),
     )
 
     record = convert_benchmark_report_to_json(report)["implementations"][0]
@@ -341,7 +357,9 @@ def test_raw_samples_are_reported_in_run_order() -> None:
         problem_name="sorting",
         settings=SETTINGS,
         implementations=(
-            ImplementationBenchmark(implementation, None, (measurement,)),
+            ImplementationBenchmark(
+                implementation=implementation, startup=None, measurements=(measurement,)
+            ),
         ),
     )
 

@@ -115,30 +115,34 @@ def test_the_timeout_is_handed_to_the_runner_of_a_traced_run() -> None:
 
 def test_failures_of_the_same_status_and_category_match() -> None:
     """Test two failures with the same status and category are the same failure."""
-    first = SingleRun(CaseStatus.ERROR, "exited with code 3", category="exit code 3")
-    second = SingleRun(CaseStatus.ERROR, "another message", category="exit code 3")
+    first = SingleRun(
+        status=CaseStatus.ERROR, message="exited with code 3", category="exit code 3"
+    )
+    second = SingleRun(
+        status=CaseStatus.ERROR, message="another message", category="exit code 3"
+    )
 
     assert first.is_same_failure_as(second)
 
 
 def test_failures_of_another_category_do_not_match() -> None:
     """Test failures with different categories are not the same failure."""
-    first = SingleRun(CaseStatus.ERROR, "", category="exit code 3")
-    second = SingleRun(CaseStatus.ERROR, "", category="timeout")
+    first = SingleRun(status=CaseStatus.ERROR, message="", category="exit code 3")
+    second = SingleRun(status=CaseStatus.ERROR, message="", category="timeout")
 
     assert not first.is_same_failure_as(second)
 
 
 def test_failures_of_another_status_do_not_match() -> None:
     """Test failures with different statuses are not the same failure."""
-    failed = SingleRun(CaseStatus.FAILED, "", category="wrong output")
-    errored = SingleRun(CaseStatus.ERROR, "", category="wrong output")
+    failed = SingleRun(status=CaseStatus.FAILED, message="", category="wrong output")
+    errored = SingleRun(status=CaseStatus.ERROR, message="", category="wrong output")
 
     assert not failed.is_same_failure_as(errored)
 
 
 def test_a_pass_never_matches() -> None:
     """Test a passing run is never the same failure as another run."""
-    passed = SingleRun(CaseStatus.PASSED, "")
+    passed = SingleRun(status=CaseStatus.PASSED, message="")
 
     assert not passed.is_same_failure_as(passed)

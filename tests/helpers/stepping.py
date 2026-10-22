@@ -13,5 +13,6 @@ QUIT = KeyPress(Key.QUIT)
 def build_frames(count: int) -> list[Frame]:
     """Build ``count`` frames whose body and caption carry their one-based number."""
     return [
-        Frame(f"body {number}", f"caption {number}") for number in range(1, count + 1)
+        Frame(f"body {number}", caption=f"caption {number}")
+        for number in range(1, count + 1)
     ]

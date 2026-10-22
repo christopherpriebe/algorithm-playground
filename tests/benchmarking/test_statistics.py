@@ -1,12 +1,16 @@
 """Tests for summarizing timings and estimating how they grow."""
 
+import inspect
 import math
+import statistics
 from collections.abc import Callable
 
 import pytest
+from hypothesis import given, strategies
 
 from algorithm_playground.core import (
     Growth,
+    TimingSummary,
     estimate_growth,
     estimate_growth_exponent,
     fit_growth_class,
@@ -36,6 +40,42 @@ def test_computes_headline_statistics() -> None:
     assert summary.median == 2.5
     assert summary.mean == 2.5
     assert summary.standard_deviation == pytest.approx(1.118033988749895)
+
+
+def test_a_timing_summary_sorts_its_samples_and_derives_the_statistics() -> None:
+    """Test a summary built from samples alone computes everything else from them."""
+    summary = TimingSummary((3.0, 1.0, 2.0))
+
+    assert summary.samples == (1.0, 2.0, 3.0)
+    assert (summary.minimum, summary.median, summary.mean) == (1.0, 2.0, 2.0)
+    assert summary.standard_deviation == pytest.approx(statistics.pstdev([1, 2, 3]))
+
+
+def test_a_timing_summary_takes_only_the_samples() -> None:
+    """Test the derived statistics cannot be given, so they cannot disagree with the samples."""
+    assert list(inspect.signature(TimingSummary).parameters) == ["samples"]
+
+
+def test_a_timing_summary_rejects_no_samples() -> None:
+    """Test an empty summary is rejected, since it has no minimum or median."""
+    with pytest.raises(ValueError, match="empty"):
+        TimingSummary(())
+
+
+@given(
+    strategies.lists(
+        strategies.floats(min_value=-1e100, max_value=1e100, allow_nan=False),
+        min_size=1,
+    )
+)
+def test_a_timing_summary_is_consistent_with_its_samples(samples: list[float]) -> None:
+    """Test the derived statistics always agree with the samples they come from."""
+    summary = TimingSummary(tuple(samples))
+
+    assert summary.samples == tuple(sorted(samples))
+    assert summary.minimum == min(samples)
+    assert summary.minimum <= summary.median <= max(samples)
+    assert summary.standard_deviation >= 0
 
 
 def test_single_sample_has_zero_standard_deviation() -> None:
@@ -304,10 +344,10 @@ def test_the_class_alone_can_be_missing() -> None:
 @pytest.mark.parametrize(
     ("growth", "text"),
     [
-        (Growth(1.21, "n log n"), "~ n log n (n^1.21)"),
-        (Growth(2.0, "n^2"), "~ n^2 (n^2.00)"),
-        (Growth(0.0, "1"), "~ 1 (n^0.00)"),
-        (Growth(1.049), "n^1.05"),
+        (Growth(exponent=1.21, growth_class="n log n"), "~ n log n (n^1.21)"),
+        (Growth(exponent=2.0, growth_class="n^2"), "~ n^2 (n^2.00)"),
+        (Growth(exponent=0.0, growth_class="1"), "~ 1 (n^0.00)"),
+        (Growth(exponent=1.049), "n^1.05"),
     ],
     ids=["linearithmic", "quadratic", "constant", "without-class"],
 )

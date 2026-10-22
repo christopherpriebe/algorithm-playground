@@ -117,7 +117,9 @@ uv run algorithm-playground benchmark sorting \
 ```
 
 Each benchmark cell shows the median and the ratio to the reference, for
-example `5.620 ms (0.09x)`. An implementation whose build fails is reported
+example `5.620 (0.09x)`. The cells carry no unit: all the times of a table share
+one (s, ms, us or ns), which the line under the table names (`median in ms, ratio
+to ...`). An implementation whose build fails is reported
 once and left out of the run, and the others still run; one that fails part-way
 shows `failed` where it failed and `skipped` for what it never reached. Exit
 codes: `0` everything passed, `1` a test, benchmark, or build failed, `2` usage

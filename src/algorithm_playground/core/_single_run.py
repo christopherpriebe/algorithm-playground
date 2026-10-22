@@ -53,24 +53,26 @@ def _judge(
     try:
         result = run()
     except RunnerError as error:
-        return SingleRun(CaseStatus.ERROR, str(error), category=error.category)
+        return SingleRun(
+            status=CaseStatus.ERROR, message=str(error), category=error.category
+        )
     try:
         verification = problem.verify(input_data, result.output)
     except Exception as error:  # noqa: BLE001  the verify hook is problem code
         return SingleRun(
-            CaseStatus.ERROR,
-            f"Verification raised {describe_error(error)}",
+            status=CaseStatus.ERROR,
+            message=f"Verification raised {describe_error(error)}",
             category=VERIFICATION_ERROR_CATEGORY,
             result=result,
         )
     if verification.passed:
-        return SingleRun(CaseStatus.PASSED, "", result=result)
+        return SingleRun(status=CaseStatus.PASSED, message="", result=result)
     message = verification.message
     if result.temporary_directory is not None:
         message += f"\nTemporary files were kept in {result.temporary_directory}"
     return SingleRun(
-        CaseStatus.FAILED,
-        message,
+        status=CaseStatus.FAILED,
+        message=message,
         category=verification.category or WRONG_OUTPUT_CATEGORY,
         result=result,
         focus=verification.focus,
@@ -85,7 +87,7 @@ class CaseStatus(Enum):
     ERROR = "error"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SingleRun:
     """The judged outcome of running one input.
 

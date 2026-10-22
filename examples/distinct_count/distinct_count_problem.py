@@ -68,18 +68,28 @@ class DistinctCountProblem(Problem[list[int], int, None]):
 
     @override
     def fixtures(self) -> Iterator[Fixture[list[int]]]:
-        yield Fixture("empty", [], "no values")
+        yield Fixture("empty", [], description="no values")
         yield Fixture("one_value", [5])
-        yield Fixture("all_equal", [3, 3, 3, 3], "one distinct value, repeated")
+        yield Fixture(
+            "all_equal", [3, 3, 3, 3], description="one distinct value, repeated"
+        )
         yield Fixture("all_distinct", [4, 1, 3, 2])
-        yield Fixture("negatives", [-1, -1, 0, 1], "negative values count too")
+        yield Fixture(
+            "negatives", [-1, -1, 0, 1], description="negative values count too"
+        )
 
     @override
     def generators(self) -> Sequence[InputGenerator[list[int]]]:
         return (
-            InputGenerator("uniform", "values from the whole i32 range", _uniform),
             InputGenerator(
-                "few_values", "values drawn from a set of five", _few_values
+                "uniform",
+                description="values from the whole i32 range",
+                generate=_uniform,
+            ),
+            InputGenerator(
+                "few_values",
+                description="values drawn from a set of five",
+                generate=_few_values,
             ),
         )
 

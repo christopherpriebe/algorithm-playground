@@ -66,43 +66,53 @@ def build_sorting_generators() -> tuple[InputGenerator[list[int]], ...]:
     return (
         InputGenerator(
             "uniform",
-            "values drawn uniformly from the whole i32 range",
-            generate_uniform,
+            description="values drawn uniformly from the whole i32 range",
+            generate=generate_uniform,
         ),
-        InputGenerator("sorted", "uniform values in ascending order", generate_sorted),
         InputGenerator(
-            "reversed", "uniform values in descending order", generate_reversed
+            "sorted",
+            description="uniform values in ascending order",
+            generate=generate_sorted,
+        ),
+        InputGenerator(
+            "reversed",
+            description="uniform values in descending order",
+            generate=generate_reversed,
         ),
         InputGenerator(
             "nearly_sorted",
-            "ascending order with about 1% of the elements swapped with a close neighbor",
-            generate_nearly_sorted,
+            description="ascending order with about 1% of the elements swapped with a close neighbor",
+            generate=generate_nearly_sorted,
         ),
         InputGenerator(
             "few_unique",
-            f"values taken from a set of {FEW_UNIQUE_VALUE_COUNT} random values",
-            generate_few_unique,
+            description=f"values taken from a set of {FEW_UNIQUE_VALUE_COUNT} random values",
+            generate=generate_few_unique,
         ),
-        InputGenerator("all_equal", "one random value repeated", generate_all_equal),
+        InputGenerator(
+            "all_equal",
+            description="one random value repeated",
+            generate=generate_all_equal,
+        ),
         InputGenerator(
             "sawtooth",
-            "the same ascending run repeated, about the square root of the size long",
-            generate_sawtooth,
+            description="the same ascending run repeated, about the square root of the size long",
+            generate=generate_sawtooth,
         ),
         InputGenerator(
             "organ_pipe",
-            "ascending up to the middle, then descending",
-            generate_organ_pipe,
+            description="ascending up to the middle, then descending",
+            generate=generate_organ_pipe,
         ),
         InputGenerator(
             "median_of_three_killer",
-            "Musser's sequence that makes median-of-three quicksort take quadratic time",
-            generate_median_of_three_killer,
+            description="Musser's sequence that makes median-of-three quicksort take quadratic time",
+            generate=generate_median_of_three_killer,
         ),
         InputGenerator(
             "small_range",
-            f"values between {-SMALL_RANGE_BOUND} and {SMALL_RANGE_BOUND}, so many duplicates",
-            generate_small_range,
+            description=f"values between {-SMALL_RANGE_BOUND} and {SMALL_RANGE_BOUND}, so many duplicates",
+            generate=generate_small_range,
         ),
     )
 

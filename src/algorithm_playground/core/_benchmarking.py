@@ -98,7 +98,7 @@ def _require_unique(label: str, values: Sequence[UniqueT]) -> None:
         raise ValueError(message)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkSettings:
     """The parameters of a benchmark run.
 
@@ -151,7 +151,7 @@ class BenchmarkPhase(Enum):
     OPERATION_COUNT = "operation count"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkProgress:
     """A progress event: one run of one implementation is starting or has ended.
 
@@ -176,7 +176,7 @@ class OperationIssueKind(Enum):
     COUNTING_FAILED = "counting failed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class OperationIssue:
     """The reason an implementation reported no operation counts at one size."""
 
@@ -184,7 +184,7 @@ class OperationIssue:
     message: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SizeMeasurement:
     """One implementation's timings at one input size of one distribution.
 
@@ -234,7 +234,7 @@ class FailureStage(Enum):
         return self in (FailureStage.MEASUREMENT, FailureStage.DISTRIBUTION)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkFailure:
     """Why an implementation stopped measuring.
 
@@ -260,7 +260,7 @@ class CellStatus(Enum):
     SKIPPED = "skipped"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ImplementationBenchmark:
     """Everything measured for one implementation.
 
@@ -443,7 +443,7 @@ class ImplementationBenchmark:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class BenchmarkReport:
     """The result of benchmarking several implementations of one problem."""
 
@@ -606,7 +606,11 @@ class _Benchmark:
         """
         for name in self._active_names(distribution=distribution):
             self.failures.setdefault(name, []).append(
-                BenchmarkFailure(FailureStage.DISTRIBUTION, message, distribution)
+                BenchmarkFailure(
+                    stage=FailureStage.DISTRIBUTION,
+                    message=message,
+                    distribution=distribution,
+                )
             )
             self._stopped.add((name, distribution))
 
@@ -700,7 +704,12 @@ class _Benchmark:
         """Record a failure; the implementation stops here for its distribution (or entirely)."""
         stage = FailureStage.STARTUP if point.size is None else FailureStage.MEASUREMENT
         self.failures.setdefault(name, []).append(
-            BenchmarkFailure(stage, message, point.distribution, point.size)
+            BenchmarkFailure(
+                stage=stage,
+                message=message,
+                distribution=point.distribution,
+                size=point.size,
+            )
         )
         self._stopped.add((name, point.distribution))
 
@@ -822,7 +831,7 @@ class _Benchmark:
             The issue to report for it.
         """
         self._fail(name, message, point)
-        return OperationIssue(OperationIssueKind.COUNTING_FAILED, message)
+        return OperationIssue(kind=OperationIssueKind.COUNTING_FAILED, message=message)
 
     def _counting_run(
         self, name: str, input_data: object
@@ -836,10 +845,12 @@ class _Benchmark:
         if self._settings.verify_outputs:
             message = self._verification_failure(input_data, result.output)
             if message is not None:
-                return OperationIssue(OperationIssueKind.UNVERIFIED_OUTPUT, message)
+                return OperationIssue(
+                    kind=OperationIssueKind.UNVERIFIED_OUTPUT, message=message
+                )
         if result.trace_error is not None:
             return OperationIssue(
-                OperationIssueKind.MALFORMED_TRACE, result.trace_error
+                kind=OperationIssueKind.MALFORMED_TRACE, message=result.trace_error
             )
         if result.trace is None:
             return None
@@ -851,9 +862,9 @@ class _Benchmark:
     ) -> None:
         self._notify(
             BenchmarkProgress(
-                name,
-                phase,
-                point.size,
+                implementation_name=name,
+                phase=phase,
+                size=point.size,
                 completed=False,
                 distribution=point.distribution,
             )
@@ -864,7 +875,11 @@ class _Benchmark:
     ) -> None:
         self._notify(
             BenchmarkProgress(
-                name, phase, point.size, completed=True, distribution=point.distribution
+                implementation_name=name,
+                phase=phase,
+                size=point.size,
+                completed=True,
+                distribution=point.distribution,
             )
         )
 

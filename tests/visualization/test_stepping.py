@@ -81,7 +81,7 @@ def play(
 
 def build_state(index: int, *, playing: bool = False) -> StepperState:
     """Build a state on a frame of five, playing or paused."""
-    return StepperState(index, 5, playing)
+    return StepperState(index=index, total=5, playing=playing)
 
 
 # These modules exist on POSIX only; the terminal tests are skipped elsewhere.
@@ -144,7 +144,7 @@ def test_space_pauses_and_resumes_but_cannot_resume_at_the_end(
 def test_the_state_rejects_a_frame_that_does_not_exist() -> None:
     """Test a state on a frame outside the frames is rejected."""
     with pytest.raises(ValueError, match="out of range"):
-        StepperState(5, 5, False)
+        StepperState(index=5, total=5, playing=False)
 
 
 @pytest.mark.parametrize(
@@ -197,7 +197,7 @@ def test_jump_asks_for_a_frame_number() -> None:
 
 def test_a_jump_typed_with_its_number_does_not_ask() -> None:
     """Test a jump that comes with its frame number shows that frame without asking."""
-    keys = ScriptedKeys([KeyPress(Key.JUMP, "3"), QUIT])
+    keys = ScriptedKeys([KeyPress(Key.JUMP, argument="3"), QUIT])
 
     shown, _ = play(5, keys)
 
@@ -207,7 +207,7 @@ def test_a_jump_typed_with_its_number_does_not_ask() -> None:
 
 def test_a_bad_jump_target_keeps_the_frame_and_says_why() -> None:
     """Test a jump to a frame that does not exist keeps the frame and explains."""
-    shown, text = play(5, ScriptedKeys([KeyPress(Key.JUMP, "9"), QUIT]))
+    shown, text = play(5, ScriptedKeys([KeyPress(Key.JUMP, argument="9"), QUIT]))
 
     assert shown == ["body 1", "body 1"]
     assert "Could not use '9' as a frame number: use 1 to 5" in text
@@ -222,7 +222,7 @@ def test_the_end_of_input_while_asking_for_a_target_ends_the_stepper() -> None:
 
 def test_an_unknown_key_is_reported_and_changes_nothing() -> None:
     """Test an unknown key is reported and keeps the frame."""
-    shown, text = play(3, ScriptedKeys([KeyPress(Key.UNKNOWN, "x"), QUIT]))
+    shown, text = play(3, ScriptedKeys([KeyPress(Key.UNKNOWN, argument="x"), QUIT]))
 
     assert shown == ["body 1", "body 1"]
     assert "Unknown key or command: 'x'" in text

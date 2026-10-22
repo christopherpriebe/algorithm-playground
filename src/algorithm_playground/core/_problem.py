@@ -26,7 +26,7 @@ checks it.
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Generic, TypeVar
 
@@ -65,12 +65,25 @@ class VerificationResult:
             block, and shrinking keeps a failure of the same category, so give
             one only when the kinds of failure are few and their names do not
             depend on the input.
+
+    Raises:
+        ValueError: If a failed verification has no message, or a passed one
+            has a focus or a category.
     """
 
     passed: bool
+    _: KW_ONLY
     message: str = ""
     focus: int | None = None
     category: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.passed and not self.message:
+            message = "A failed verification needs a message"
+            raise ValueError(message)
+        if self.passed and (self.focus is not None or self.category):
+            message = "A passed verification cannot have a focus or a category"
+            raise ValueError(message)
 
 
 class Problem(ABC, Generic[InputT, OutputT, TraceT]):

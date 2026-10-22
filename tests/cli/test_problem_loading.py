@@ -439,7 +439,7 @@ def test_a_hook_can_import_a_neighbor_of_the_file_while_the_command_runs(
         "    description = 'imports a neighbor from a hook'\n\n"
         "    def fixtures(self):\n"
         "        from guidance_lazy_neighbor import DESCRIPTION\n"
-        "        return [Fixture('neighbor', [1], DESCRIPTION)]\n"
+        "        return [Fixture('neighbor', [1], description=DESCRIPTION)]\n"
     )
 
     result = invoke_cli("list", "lazy-variant", "--problem-module", str(path))

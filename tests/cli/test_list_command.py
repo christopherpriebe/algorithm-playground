@@ -253,7 +253,7 @@ def test_names_that_look_like_markup_are_shown_as_they_are(
         "    name = 'markup'\n"
         "    description = '[bold]loud[/bold] [red'\n"
         "    def fixtures(self):\n"
-        "        yield Fixture('[red]boom', [1], '[/oops] text')\n"
+        "        yield Fixture('[red]boom', [1], description='[/oops] text')\n"
     )
 
     result = invoke_cli("list", "markup", "--problem-module", str(module))

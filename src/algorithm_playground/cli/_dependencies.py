@@ -23,7 +23,7 @@ from algorithm_playground.visualization._stepper import step_through
 __all__ = ["CommandDependencies"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CommandDependencies:
     """The engines, checks and drawing functions that the commands call.
 

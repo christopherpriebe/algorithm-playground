@@ -35,8 +35,14 @@ def drawn_output(capsys: pytest.CaptureFixture[str]) -> str:
     """The text printed by a line chart of two series with a title."""
     render_line_chart(
         [
-            ChartSeries("fast-sort", (10, 100, 1000), (0.001, 0.002, 0.004)),
-            ChartSeries("slow-sort", (10, 100, 1000), (0.01, 0.02, 0.04)),
+            ChartSeries(
+                name="fast-sort",
+                x_values=(10, 100, 1000),
+                y_values=(0.001, 0.002, 0.004),
+            ),
+            ChartSeries(
+                name="slow-sort", x_values=(10, 100, 1000), y_values=(0.01, 0.02, 0.04)
+            ),
         ],
         title="comparison",
         x_label="size",
@@ -76,7 +82,9 @@ def test_a_highlight_adds_a_legend_entry_and_its_own_color() -> None:
     plain_chart = render_bar_chart(BAR_VALUES, title="t")
 
     marked = render_bar_chart(
-        BAR_VALUES, title="t", highlights=[BarHighlight((1, 4), "red", "swapped")]
+        BAR_VALUES,
+        title="t",
+        highlights=[BarHighlight((1, 4), color="red", label="swapped")],
     )
 
     assert "swapped" in strip_ansi_codes(marked)
@@ -87,7 +95,7 @@ def test_a_highlight_adds_a_legend_entry_and_its_own_color() -> None:
 def test_a_highlight_without_bars_leaves_no_legend_entry() -> None:
     """Test a highlight that names no bar adds no legend entry."""
     text = render_bar_chart(
-        BAR_VALUES, title="t", highlights=[BarHighlight((), "red", "none")]
+        BAR_VALUES, title="t", highlights=[BarHighlight((), color="red", label="none")]
     )
 
     assert "none" not in strip_ansi_codes(text)
@@ -99,8 +107,8 @@ def test_a_bar_named_twice_keeps_the_first_highlight() -> None:
         BAR_VALUES,
         title="t",
         highlights=[
-            BarHighlight((2,), "red", "first"),
-            BarHighlight((2,), "green", "second"),
+            BarHighlight((2,), color="red", label="first"),
+            BarHighlight((2,), color="green", label="second"),
         ],
     )
 
@@ -133,7 +141,7 @@ def test_a_highlight_draws_only_its_own_bars(monkeypatch: pytest.MonkeyPatch) ->
     render_bar_chart(
         [5, 3, 8, 1, 9, 2],
         title="t",
-        highlights=[BarHighlight((1, 4), "red", "compared")],
+        highlights=[BarHighlight((1, 4), color="red", label="compared")],
     )
 
     assert drawn == [
@@ -151,7 +159,7 @@ def test_a_highlight_leaves_the_picture_of_the_plain_bars_as_it_was() -> None:
         render_bar_chart(
             values,
             title="t",
-            highlights=[BarHighlight((1, 3), "red", "x")],
+            highlights=[BarHighlight((1, 3), color="red", label="x")],
             height=12,
         )
     )
@@ -166,7 +174,7 @@ def test_a_highlight_leaves_the_picture_of_the_plain_bars_as_it_was() -> None:
 def test_indices_outside_the_values_are_ignored() -> None:
     """Test a highlight naming indices outside the values adds no legend entry."""
     text = render_bar_chart(
-        [1, 2], title="t", highlights=[BarHighlight((7, -1), "red", "far")]
+        [1, 2], title="t", highlights=[BarHighlight((7, -1), color="red", label="far")]
     )
 
     assert "far" not in strip_ansi_codes(text)
@@ -231,7 +239,7 @@ def test_side_by_side_charts_highlight_both_sides() -> None:
             left_title="l",
             right_title="r",
             height=10,
-            highlights=[BarHighlight((0,), "red", "first difference")],
+            highlights=[BarHighlight((0,), color="red", label="first difference")],
         )
     )
 

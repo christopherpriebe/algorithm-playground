@@ -7,7 +7,7 @@ are joined in file order. See :doc:`/problems/sorting` for the byte layout.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from pathlib import Path
 from typing import BinaryIO
 
@@ -74,6 +74,7 @@ class SortingTrace:
     """
 
     snapshots: tuple[tuple[int, ...], ...]
+    _: KW_ONLY
     events: EventLog | None = None
 
 
@@ -125,7 +126,7 @@ def read_trace(path: Path, input_values: Sequence[int]) -> SortingTrace | None:
     events = EventLog.from_records(b"".join(event_records)) if event_records else None
     if not snapshots and events is None:
         return None
-    trace = SortingTrace(snapshots, events)
+    trace = SortingTrace(snapshots, events=events)
     if events is not None:
         _check_events(events, len(choose_start_values(trace, input_values)))
     return trace

@@ -66,7 +66,8 @@ Required members:
 ``verify(input_data, output)``
    Return a :class:`~algorithm_playground.core.VerificationResult`:
    whether ``output`` is a valid answer for ``input_data`` and, if not, a
-   message that says why. Two more fields are optional. ``focus`` is the position
+   message that says why: a failure needs a message (a pass may carry one too).
+   Two more fields are optional and are for failures only. ``focus`` is the position
    in the output where the first problem is (the index of the first element that
    differs): failure reports then show a window around it, not the start of a
    long output. ``category`` is a short name for the kind of wrong answer
@@ -324,8 +325,9 @@ objects, each with a stable identifier (``fixture:empty``,
 :class:`random.Random`, the identifier is enough to rebuild the input exactly.
 A generator therefore has to take all of its randomness from the generator it
 is given, must return the same input for the same state, and must accept every
-size from the problem's ``minimum_size`` up. Its name appears in identifiers and
-may not contain a colon or whitespace. Numbers in an identifier are written the
+size from the problem's ``minimum_size`` up. Its name appears in identifiers, so
+constructing an ``InputGenerator`` with a name that is empty or contains a colon
+or whitespace raises ``ValueError``. Numbers in an identifier are written the
 canonical way: ``size=05``, ``seed=+7`` and ``size=1_0`` are refused rather than
 guessed at.
 
@@ -388,9 +390,10 @@ list of findings (empty means valid);
 
 It checks that the problem has a name and a description, a non-negative integer
 ``minimum_size``, a ``debug_generator`` that names one of its generators, and
-``operation_names`` that are unique text; that fixture names are non-empty and
-unique, every fixture is accepted by ``check_input`` and serializes; that
-generator names are usable in identifiers and unique; that each generator returns
+``operation_names`` that are unique text; that fixture names are
+unique (construction already rejects an empty one), every fixture is accepted by
+``check_input`` and serializes; that generator names are unique (construction
+already rejects one that is unusable in identifiers); that each generator returns
 the same input for the same seed, accepts the sizes from ``minimum_size`` up, and
 produces inputs that ``check_input`` accepts and that serialize; that
 ``deserialize_input``, when the problem has it, reads back what ``serialize_input``

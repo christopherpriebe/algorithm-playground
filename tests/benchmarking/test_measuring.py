@@ -57,7 +57,9 @@ class ProblemWhoseGeneratorRaises(SortingProblem):
 
         return tuple(
             InputGenerator(
-                generator.name, generator.description, reversed_unless_failing
+                generator.name,
+                description=generator.description,
+                generate=reversed_unless_failing,
             )
             if generator.name == "reversed"
             else generator
@@ -70,7 +72,9 @@ class ProblemWhoseDefaultGeneratorRaises(SortingProblem):
 
     @override
     def generators(self) -> tuple[InputGenerator[list[int]], ...]:
-        return (InputGenerator("uniform", "raises", fail_to_generate),)
+        return (
+            InputGenerator("uniform", description="raises", generate=fail_to_generate),
+        )
 
 
 class ProblemWhoseGeneratorsHookRaises(SortingProblem):

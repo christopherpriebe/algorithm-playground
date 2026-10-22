@@ -7,11 +7,11 @@ valid). It checks that:
 * the problem has a name and a description, a non-negative integer
   ``minimum_size``, a ``debug_generator`` that names one of its generators (or
   ``None``), and ``operation_names`` that are unique text;
-* fixtures exist, have non-empty unique names, are accepted by ``check_input``
-  and serialize;
-* generators exist, have unique names without colons or whitespace, return the
-  same input for the same seed, accept the sizes from ``minimum_size`` up, and
-  produce inputs that ``check_input`` accepts and that serialize;
+* fixtures exist, have unique names, are accepted by ``check_input`` and
+  serialize;
+* generators exist, have unique names, return the same input for the same
+  seed, accept the sizes from ``minimum_size`` up, and produce inputs that
+  ``check_input`` accepts and that serialize;
 * ``deserialize_input``, when a problem provides it, reads back the input that
   ``serialize_input`` wrote;
 * ``expected_output``, when a problem provides it, passes ``verify`` and can
@@ -51,15 +51,6 @@ _MAXIMUM_FRAME_CHECKS = 3
 _DESCRIPTION_LIMIT = 40
 
 ResultT = TypeVar("ResultT")
-
-
-def _is_valid_generator_name(name: object) -> bool:
-    return (
-        isinstance(name, str)
-        and bool(name)
-        and ":" not in name
-        and not any(character.isspace() for character in name)
-    )
 
 
 def validate_problem(problem: AnyProblem, *, seed: int = 0) -> list[str]:
@@ -253,11 +244,6 @@ class _Validator:
                 self._record(
                     f"fixtures() must yield Fixture objects, got {type(fixture).__name__}"
                 )
-            elif (
-                not isinstance(fixture_name := cast("object", fixture.name), str)
-                or not fixture_name
-            ):
-                self._record("a fixture has an empty name")
             elif fixture.name in names:
                 self._record(
                     f"the fixture name '{fixture.name}' is used more than once"
@@ -283,11 +269,6 @@ class _Validator:
             if not isinstance(generator, InputGenerator):
                 self._record(
                     f"generators() must hold InputGenerator objects, got {type(generator).__name__}"
-                )
-            elif not _is_valid_generator_name(generator.name):
-                self._record(
-                    f"the generator name {generator.name!r} must be non-empty and contain "
-                    "no colon or whitespace"
                 )
             elif generator.name in names:
                 self._record(

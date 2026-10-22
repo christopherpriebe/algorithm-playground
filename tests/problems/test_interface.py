@@ -2,12 +2,15 @@
 
 import random
 from pathlib import Path
+from typing import cast
 
 import pytest
+from hypothesis import given, strategies
 from typing_extensions import override
 
 from algorithm_playground.core import (
     Fixture,
+    GeneratedOrigin,
     HookError,
     InputGenerator,
     Problem,
@@ -17,6 +20,7 @@ from algorithm_playground.core import (
     call_hook,
     has_input_reader,
     has_trace_format,
+    parse_case_identifier,
 )
 
 
@@ -45,11 +49,15 @@ class MinimalProblem(Problem[list[int], int, None]):
 
     @override
     def generators(self) -> tuple[InputGenerator[list[int]], ...]:
-        return (InputGenerator("small", "small numbers", generate_small_numbers),)
+        return (
+            InputGenerator(
+                "small", description="small numbers", generate=generate_small_numbers
+            ),
+        )
 
     @override
     def verify(self, input_data: list[int], output: int) -> VerificationResult:
-        return VerificationResult(output == len(input_data), "wrong count")
+        return VerificationResult(output == len(input_data), message="wrong count")
 
 
 class ReadingProblem(MinimalProblem):
@@ -132,16 +140,98 @@ def test_the_output_is_described_the_same_with_or_without_a_focus(
 
 def test_a_verification_names_no_position_and_no_category_by_default() -> None:
     """Test a verification result has no focus and an empty category unless given."""
-    result = VerificationResult(False, "wrong")
+    result = VerificationResult(False, message="wrong")
 
     assert (result.focus, result.category) == (None, "")
 
 
 def test_a_verification_can_name_a_position_and_a_category() -> None:
     """Test a verification result keeps the focus and category it is given."""
-    result = VerificationResult(False, "wrong", focus=3, category="short")
+    result = VerificationResult(False, message="wrong", focus=3, category="short")
 
     assert (result.focus, result.category) == (3, "short")
+
+
+def test_a_failed_verification_needs_a_message() -> None:
+    """Test a failure without a message is rejected, since reports would say nothing."""
+    with pytest.raises(ValueError, match="failed verification needs a message"):
+        VerificationResult(False)
+
+
+@pytest.mark.parametrize(
+    ("focus", "category"), [(1, ""), (None, "short")], ids=["focus", "category"]
+)
+def test_a_passed_verification_has_no_focus_or_category(
+    focus: int | None, category: str
+) -> None:
+    """Test a focus or a category, which only describe a failure, is rejected on a pass."""
+    with pytest.raises(
+        ValueError, match="passed verification cannot have a focus or a category"
+    ):
+        VerificationResult(True, focus=focus, category=category)
+
+
+def test_a_passed_verification_may_carry_a_message() -> None:
+    """Test ``VerificationResult(ok, message=...)`` works whichever way ``ok`` goes."""
+    result = VerificationResult(True, message="expected 3, got 3")
+
+    assert result.passed
+    assert result.message == "expected 3, got 3"
+
+
+def test_a_fixture_needs_a_name() -> None:
+    """Test an empty fixture name is rejected, since its case could not be named."""
+    with pytest.raises(ValueError, match="fixture needs a non-empty name"):
+        Fixture("", [2])
+
+
+NOT_TEXT = [5, None, b"bytes"]
+
+
+@pytest.mark.parametrize("name", NOT_TEXT, ids=repr)
+def test_a_fixture_name_that_is_not_text_is_rejected(name: object) -> None:
+    """Test a problem without type checking that passes a non-string name gets a clear error."""
+    with pytest.raises(ValueError, match="fixture needs a non-empty name"):
+        Fixture(cast("str", name), [2])
+
+
+@pytest.mark.parametrize("name", NOT_TEXT, ids=repr)
+def test_a_generator_name_that_is_not_text_is_rejected(name: object) -> None:
+    """Test a non-string generator name gets the naming error, not a TypeError."""
+    with pytest.raises(
+        ValueError, match="must be non-empty and contain no colon or whitespace"
+    ):
+        InputGenerator(
+            cast("str", name), description="bad", generate=generate_small_numbers
+        )
+
+
+@pytest.mark.parametrize("name", ["", "has space", "has\ttab", "has:colon"], ids=repr)
+def test_a_generator_name_must_be_usable_in_identifiers(name: str) -> None:
+    """Test a generator name that is empty or has a colon or whitespace is rejected."""
+    with pytest.raises(
+        ValueError, match="must be non-empty and contain no colon or whitespace"
+    ):
+        InputGenerator(name, description="bad", generate=generate_small_numbers)
+
+
+@given(
+    strategies.text(min_size=1).filter(
+        lambda name: (
+            ":" not in name and not any(character.isspace() for character in name)
+        )
+    ),
+    strategies.integers(min_value=0),
+    strategies.integers(min_value=0),
+)
+def test_every_accepted_generator_name_round_trips_through_a_case_identifier(
+    name: str, size: int, seed: int
+) -> None:
+    """Test a name the generator accepts can always be read back from its case identifier."""
+    InputGenerator(name, description="any", generate=generate_small_numbers)
+    origin = GeneratedOrigin(generator_name=name, seed=seed, size=size)
+
+    assert parse_case_identifier(origin.identifier) == origin
 
 
 def test_the_problem_has_no_trace_format(

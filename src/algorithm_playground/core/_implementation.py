@@ -7,10 +7,12 @@ as the program honors the problem's binary contract.
 """
 
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping
+from dataclasses import KW_ONLY, dataclass, field
 from pathlib import Path
 from typing import Self
+
+from typing_extensions import override
 
 from algorithm_playground.core._support import split_command_text
 
@@ -39,6 +41,37 @@ def _is_valid_environment_variable(variable: str, value: str) -> bool:
     )
 
 
+class _Environment(Mapping[str, str]):
+    """An immutable, hashable copy of environment variables that pickles and copies."""
+
+    def __init__(self, variables: Mapping[str, str]) -> None:
+        self._variables = dict(variables)
+
+    @override
+    def __getitem__(self, variable: str) -> str:
+        return self._variables[variable]
+
+    @override
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._variables)
+
+    @override
+    def __len__(self) -> int:
+        return len(self._variables)
+
+    @override
+    def __repr__(self) -> str:
+        return repr(self._variables)
+
+    @override
+    def __hash__(self) -> int:
+        return hash(frozenset(self._variables.items()))
+
+    @override
+    def __reduce__(self) -> tuple[type[Self], tuple[dict[str, str]]]:
+        return type(self), (dict(self._variables),)
+
+
 @dataclass(frozen=True, slots=True)
 class Implementation:
     """A named command that implements a problem's binary contract.
@@ -57,6 +90,9 @@ class Implementation:
         timeout_seconds: A timeout that replaces the one given for a run when
             it is set.
 
+    The environment is copied and read-only, and implementations are hashable,
+    can be pickled and can be deep-copied.
+
     Raises:
         ValueError: If the name or the command is empty, the build command is
             empty, an environment variable is invalid, or the timeout is not
@@ -65,6 +101,7 @@ class Implementation:
 
     name: str
     command: tuple[str, ...]
+    _: KW_ONLY
     working_directory: Path | None = None
     build_command: tuple[str, ...] | None = None
     inherit_environment: bool = False
@@ -72,6 +109,9 @@ class Implementation:
     timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
+        # A read-only copy, so neither the caller's mapping nor later writes can
+        # change what was validated below.
+        object.__setattr__(self, "environment", _Environment(self.environment))
         if not self.name:
             message = "An implementation must have a non-empty name"
             raise ValueError(message)

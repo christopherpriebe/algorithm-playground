@@ -143,7 +143,7 @@ class CasePhase(Enum):
     COMPLETED = "completed"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class FailureDetail:
     """A failing run described for people: the input, the expected output, the actual output.
 
@@ -156,7 +156,7 @@ class FailureDetail:
     actual_text: str | None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ShrunkFailure:
     """The smallest failing input that shrinking found, and how it failed."""
 
@@ -165,7 +165,7 @@ class ShrunkFailure:
     detail: FailureDetail
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CaseOutcome:
     """The result of one implementation on one case.
 
@@ -195,7 +195,7 @@ class CaseOutcome:
         return self.case.identifier
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CaseProgress:
     """A progress event: the engine started, is shrinking, or completed one case.
 
@@ -209,7 +209,7 @@ class CaseProgress:
     outcome: CaseOutcome | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ShrinkOptions:
     """The limits within which failing generated cases are shrunk.
 
@@ -225,7 +225,7 @@ class ShrinkOptions:
     clock: Callable[[], float] = time.monotonic
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class TestRunOptions:
     """How :func:`run_tests` runs the cases.
 
@@ -243,7 +243,7 @@ class TestRunOptions:
     description_limit: int = DEFAULT_DESCRIPTION_LIMIT
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class TestSettings:
     """The limits a test run worked within, recorded in its report."""
 
@@ -256,7 +256,7 @@ class TestSettings:
     shrink_time_budget_seconds: float = DEFAULT_SHRINK_TIME_BUDGET_SECONDS
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class TestReport:
     """All outcomes of a test run, one per case and implementation."""
 
@@ -615,7 +615,13 @@ class _TestRun:
             self._on_progress(event)
 
     def _run_case(self, state: _ImplementationState, case: AnyCase) -> CaseOutcome:
-        self._report(CaseProgress(state.name, case.identifier, CasePhase.RUNNING))
+        self._report(
+            CaseProgress(
+                implementation_name=state.name,
+                case_identifier=case.identifier,
+                phase=CasePhase.RUNNING,
+            )
+        )
         attempt = run_single(self._problem, state.runner, case.input_data)
         detail = None
         if attempt.status is not CaseStatus.PASSED:
@@ -624,10 +630,10 @@ class _TestRun:
             )
         shrunk, shrink_note = self._shrink_failure(state, case, attempt)
         outcome = CaseOutcome(
-            case,
-            state.name,
-            attempt.status,
-            attempt.message,
+            case=case,
+            implementation_name=state.name,
+            status=attempt.status,
+            message=attempt.message,
             detail=detail,
             shrunk=shrunk,
             shrink_note=shrink_note,
@@ -635,7 +641,12 @@ class _TestRun:
         )
         if self._on_progress is not None:
             self._on_progress(
-                CaseProgress(state.name, case.identifier, CasePhase.COMPLETED, outcome)
+                CaseProgress(
+                    implementation_name=state.name,
+                    case_identifier=case.identifier,
+                    phase=CasePhase.COMPLETED,
+                    outcome=outcome,
+                )
             )
         return outcome
 
@@ -660,7 +671,13 @@ class _TestRun:
         note = state.reason_not_to_shrink(attempt, shrinking)
         if note is not None:
             return None, note
-        self._report(CaseProgress(state.name, case.identifier, CasePhase.SHRINKING))
+        self._report(
+            CaseProgress(
+                implementation_name=state.name,
+                case_identifier=case.identifier,
+                phase=CasePhase.SHRINKING,
+            )
+        )
         return self._shrink_within_budget(state, case, attempt, shrinking=shrinking)
 
     def _shrink_within_budget(

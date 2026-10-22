@@ -28,7 +28,9 @@ def build_configuration(
     return Configuration(
         path=tmp_path / DEFAULT_CONFIGURATION_FILE_NAME,
         configured_implementations=tuple(
-            ConfiguredImplementation(problem_name, implementation)
+            ConfiguredImplementation(
+                problem_name=problem_name, implementation=implementation
+            )
             for problem_name, implementation in entries
         ),
     )

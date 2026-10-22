@@ -1,6 +1,8 @@
 """Tests for building implementations from executables and command text."""
 
+import copy
 import dataclasses
+import pickle
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -142,6 +144,60 @@ def test_keeps_the_environment_and_timeout_it_is_given() -> None:
 
     assert implementation.environment == {"A": "1"}
     assert implementation.timeout_seconds == 2.5
+
+
+def test_equal_implementations_hash_alike() -> None:
+    """Test implementations with the same fields are one member of a set."""
+    first = Implementation(name="sorter", command=("./sorter",), environment={"A": "1"})
+    second = Implementation(
+        name="sorter", command=("./sorter",), environment={"A": "1"}
+    )
+
+    assert hash(first) == hash(second)
+    assert {first, second} == {first}
+
+
+def test_implementations_that_differ_only_in_environment_are_unequal() -> None:
+    """Test the environment takes part in equality even though it is not hashed."""
+    first = Implementation(name="sorter", command=("./sorter",), environment={"A": "1"})
+    second = Implementation(
+        name="sorter", command=("./sorter",), environment={"A": "2"}
+    )
+
+    assert first != second
+
+
+def test_the_environment_cannot_be_changed_after_construction() -> None:
+    """Test the environment is read-only, so it cannot slip past validation."""
+    implementation = Implementation(
+        name="sorter", command=("./sorter",), environment={"A": "1"}
+    )
+
+    with pytest.raises(TypeError, match="does not support item assignment"):
+        implementation.environment["B"] = "\0"  # ty: ignore[invalid-assignment]  the point is that a Mapping has no item assignment
+
+
+def test_changing_the_given_mapping_does_not_change_the_implementation() -> None:
+    """Test the implementation keeps its own copy of the environment."""
+    environment = {"A": "1"}
+    implementation = Implementation(
+        name="sorter", command=("./sorter",), environment=environment
+    )
+
+    environment["B"] = "2"
+
+    assert implementation.environment == {"A": "1"}
+
+
+def test_an_implementation_survives_pickling_and_deep_copies() -> None:
+    """Test the read-only environment does not stop implementations from being copied or pickled."""
+    implementation = Implementation(
+        name="sorter", command=("./sorter",), environment={"A": "1"}
+    )
+
+    assert pickle.loads(pickle.dumps(implementation)) == implementation  # noqa: S301  the test unpickles only what it just pickled
+    assert copy.deepcopy(implementation) == implementation
+    assert dataclasses.asdict(implementation)["environment"] == {"A": "1"}
 
 
 def test_resolves_the_path_and_names_after_the_file(tmp_path: Path) -> None:

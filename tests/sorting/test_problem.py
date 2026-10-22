@@ -77,7 +77,7 @@ def test_the_operation_names_are_the_keys_of_the_counts(
     problem: SortingProblem,
 ) -> None:
     """Test the operation counts of a trace are keyed by the operation names."""
-    trace = SortingTrace((), EventLog.from_events([]))
+    trace = SortingTrace((), events=EventLog.from_events([]))
 
     counts = problem.operation_counts([], [], trace)
 

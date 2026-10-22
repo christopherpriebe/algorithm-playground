@@ -26,7 +26,7 @@ the hook, instead of the original exception.
 
 import random
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from algorithm_playground.core._errors import AlgorithmPlaygroundError
@@ -157,13 +157,18 @@ def _parse_generated_identifier(text: str) -> "GeneratedOrigin | None":
         message = f"Case identifier {text!r} has a negative size"
         raise CaseError(message)
     return GeneratedOrigin(
-        generator_name, _labeled_integer(text, seed_part, "seed"), size
+        generator_name=generator_name,
+        seed=_labeled_integer(text, seed_part, "seed"),
+        size=size,
     )
 
 
 def _fixture_cases(problem: "AnyProblem") -> list["AnyCase"]:
     return [
-        Case(FixtureOrigin(fixture.name, fixture.description), fixture.input_data)
+        Case(
+            FixtureOrigin(fixture.name, description=fixture.description),
+            fixture.input_data,
+        )
         for fixture in collect_problem_fixtures(problem)
     ]
 
@@ -197,6 +202,23 @@ def _random_case(
     return generate_case(generator, size=size, seed=seed)
 
 
+def _is_valid_generator_name(name: str) -> bool:
+    """Tell whether a generator name can be read back from a case identifier.
+
+    Args:
+        name: The name to check.
+
+    Returns:
+        Whether the name is non-empty and has no colon or whitespace.
+    """
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and ":" not in name
+        and not any(character.isspace() for character in name)
+    )
+
+
 class CaseError(AlgorithmPlaygroundError, ValueError):
     """Raised when a case identifier or a case plan cannot be turned into cases."""
 
@@ -209,11 +231,20 @@ class Fixture(Generic[InputT]):
         name: The name that identifies the fixture in case identifiers.
         input_data: The input.
         description: Why the input is interesting.
+
+    Raises:
+        ValueError: If the name is empty.
     """
 
     name: str
     input_data: InputT
+    _: KW_ONLY
     description: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            message = "A fixture needs a non-empty name"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,11 +262,23 @@ class InputGenerator(Generic[InputT]):
             same state, must accept every size from the problem's
             ``minimum_size`` up, and must take all of its randomness from
             ``random_generator``.
+
+    Raises:
+        ValueError: If the name is empty or contains a colon or whitespace.
     """
 
     name: str
+    _: KW_ONLY
     description: str
     generate: Callable[[random.Random, int], InputT]
+
+    def __post_init__(self) -> None:
+        if not _is_valid_generator_name(self.name):
+            message = (
+                f"The generator name {self.name!r} must be non-empty and contain "
+                "no colon or whitespace"
+            )
+            raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +290,7 @@ class FixtureOrigin:
     """
 
     name: str
+    _: KW_ONLY
     description: str = field(default="", compare=False)
 
     @property
@@ -255,7 +299,7 @@ class FixtureOrigin:
         return f"{FIXTURE_PREFIX}{self.name}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class GeneratedOrigin:
     """The case is what generator ``generator_name`` returns for ``size`` and ``seed``."""
 
@@ -306,7 +350,7 @@ AnyInputGenerator = InputGenerator[Any]
 AnyCase = Case[Any]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class CasePlan:
     """Which cases a test run uses.
 
@@ -422,7 +466,9 @@ def generate_case(
             size,
         ),
     )
-    return Case(GeneratedOrigin(generator.name, seed, size), input_data)
+    return Case(
+        GeneratedOrigin(generator_name=generator.name, seed=seed, size=size), input_data
+    )
 
 
 def build_cases(problem: "AnyProblem", plan: CasePlan) -> tuple[AnyCase, ...]:
@@ -527,7 +573,8 @@ def resolve_case(problem: "AnyProblem", identifier: str) -> AnyCase:
         for fixture in fixtures:
             if fixture.name == origin.name:
                 return Case(
-                    FixtureOrigin(fixture.name, fixture.description), fixture.input_data
+                    FixtureOrigin(fixture.name, description=fixture.description),
+                    fixture.input_data,
                 )
         available = ", ".join(fixture.name for fixture in fixtures) or "(none)"
         message = f"No fixture named '{origin.name}'. Available fixtures: {available}"

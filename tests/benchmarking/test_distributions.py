@@ -366,7 +366,7 @@ def completed_report(request: pytest.FixtureRequest) -> BenchmarkReport:
     return include_failed_implementations(
         report,
         build_named_implementations("steady", "unrun"),
-        {"unrun": BenchmarkFailure(stage, message)},
+        {"unrun": BenchmarkFailure(stage=stage, message=message)},
     )
 
 
@@ -393,7 +393,7 @@ def test_a_failed_build_records_the_build_message() -> None:
     completed = include_failed_implementations(
         report,
         build_named_implementations("steady", "unbuilt"),
-        {"unbuilt": BenchmarkFailure(FailureStage.BUILD, "make: error")},
+        {"unbuilt": BenchmarkFailure(stage=FailureStage.BUILD, message="make: error")},
     )
 
     unbuilt = completed.implementations[1]
@@ -409,7 +409,11 @@ def test_an_implementation_that_cannot_run_records_the_cannot_run_stage() -> Non
     completed = include_failed_implementations(
         report,
         build_named_implementations("steady", "missing"),
-        {"missing": BenchmarkFailure(FailureStage.CANNOT_RUN, "Cannot run: not found")},
+        {
+            "missing": BenchmarkFailure(
+                stage=FailureStage.CANNOT_RUN, message="Cannot run: not found"
+            )
+        },
     )
 
     missing = completed.implementations[1]

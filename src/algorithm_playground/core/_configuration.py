@@ -355,7 +355,7 @@ class ConfigurationError(AlgorithmPlaygroundError, ValueError):
     """Raised when a configuration file is missing, malformed, or invalid."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ConfiguredImplementation:
     """An implementation together with the problem it solves."""
 
@@ -363,7 +363,7 @@ class ConfiguredImplementation:
     implementation: Implementation
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Configuration:
     """The parsed contents of a configuration file.
 

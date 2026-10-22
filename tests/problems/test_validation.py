@@ -107,19 +107,6 @@ def test_fixture_names_must_be_unique() -> None:
     assert "the fixture name 'a' is used more than once" in findings
 
 
-def test_fixture_names_must_be_non_empty() -> None:
-    """Test a fixture with an empty name is a finding."""
-
-    def provide_unnamed_fixture(
-        _: SortingProblem,
-    ) -> Iterator[Fixture[list[int]]]:
-        yield Fixture("", [2])
-
-    findings = validate_problem(build_sorting_variant(fixtures=provide_unnamed_fixture))
-
-    assert "a fixture has an empty name" in findings
-
-
 def test_fixtures_must_be_fixture_objects() -> None:
     """Test a fixtures hook that yields something other than fixtures is a finding."""
 
@@ -149,27 +136,6 @@ def test_a_fixture_that_does_not_serialize_is_named() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "name", ["", "has space", "has:colon"], ids=["empty", "whitespace", "colon"]
-)
-def test_generator_names_must_be_usable_in_identifiers(name: str) -> None:
-    """Test a generator name that is empty or has a colon or whitespace is a finding."""
-
-    def provide_badly_named_generator(
-        _: SortingProblem,
-    ) -> tuple[InputGenerator[list[int]]]:
-        return (InputGenerator(name, "bad", generate_values),)
-
-    problem = build_sorting_variant(generators=provide_badly_named_generator)
-
-    findings = validate_problem(problem)
-
-    assert (
-        f"the generator name {name!r} must be non-empty and contain no colon or whitespace"
-        in findings
-    )
-
-
 def test_generator_names_must_be_unique() -> None:
     """Test a generator name used twice is a finding."""
 
@@ -177,8 +143,8 @@ def test_generator_names_must_be_unique() -> None:
         _: SortingProblem,
     ) -> tuple[InputGenerator[list[int]], InputGenerator[list[int]]]:
         return (
-            InputGenerator("same", "one", generate_values),
-            InputGenerator("same", "two", generate_values),
+            InputGenerator("same", description="one", generate=generate_values),
+            InputGenerator("same", description="two", generate=generate_values),
         )
 
     problem = build_sorting_variant(generators=provide_repeated_generators)
@@ -198,7 +164,11 @@ def test_a_generator_must_be_deterministic_for_a_fixed_seed() -> None:
         _: SortingProblem,
     ) -> tuple[InputGenerator[list[int]]]:
         return (
-            InputGenerator("unseeded", "uses global randomness", generate_unseeded),
+            InputGenerator(
+                "unseeded",
+                description="uses global randomness",
+                generate=generate_unseeded,
+            ),
         )
 
     problem = build_sorting_variant(generators=provide_unseeded_generator)
@@ -221,7 +191,7 @@ def test_a_generator_must_accept_size_zero() -> None:
         return generate_values(random_generator, size)
 
     def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
-        return (InputGenerator("g", "g", generate_unless_empty),)
+        return (InputGenerator("g", description="g", generate=generate_unless_empty),)
 
     findings = validate_problem(build_sorting_variant(generators=provide_generator))
 
@@ -346,7 +316,7 @@ def test_generators_are_sampled_from_the_minimum_size_up() -> None:
         return generate_values(random_generator, size)
 
     def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
-        return (InputGenerator("g", "g", generate_from_four),)
+        return (InputGenerator("g", description="g", generate=generate_from_four),)
 
     problem = build_sorting_variant(
         minimum_size=4, debug_generator=None, generators=provide_generator
@@ -368,7 +338,7 @@ def test_a_generator_that_fails_below_the_minimum_size_is_reported_there() -> No
         return [0] * size
 
     def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
-        return (InputGenerator("g", "g", generate_from_four),)
+        return (InputGenerator("g", description="g", generate=generate_from_four),)
 
     findings = validate_problem(build_sorting_variant(generators=provide_generator))
 

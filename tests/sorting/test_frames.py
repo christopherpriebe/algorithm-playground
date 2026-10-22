@@ -46,7 +46,7 @@ def build_event_frames(
     log = EventLog.from_events(
         [SortingEvent(EventType(kind), first, second) for kind, first, second in events]
     )
-    return draw_sorting_trace_frames(input_values, SortingTrace(snapshots, log))
+    return draw_sorting_trace_frames(input_values, SortingTrace(snapshots, events=log))
 
 
 @pytest.fixture
@@ -269,7 +269,7 @@ def test_a_trace_of_a_million_events_is_framed_without_drawing_any(
     assert len(compare_record) == EVENT_RECORD_BYTES
     log = EventLog.from_records(compare_record * 1_000_000)
 
-    frames = draw_sorting_trace_frames((2, 1), SortingTrace((), log))
+    frames = draw_sorting_trace_frames((2, 1), SortingTrace((), events=log))
 
     assert len(frames) == 1_000_001
     assert drawn_heights == []

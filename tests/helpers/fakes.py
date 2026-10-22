@@ -170,7 +170,7 @@ def _build_trace(recording: Recording) -> SortingTrace:
         bytes([kind]) + first.to_bytes(4, "little") + second.to_bytes(4, "little")
         for kind, first, second in recording.events
     )
-    return SortingTrace((), EventLog.from_records(records))
+    return SortingTrace((), events=EventLog.from_records(records))
 
 
 def build_insertion_sort_trace(values: list[int]) -> SortingTrace:

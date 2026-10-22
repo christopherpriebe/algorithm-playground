@@ -66,13 +66,45 @@ def _squared_residual(
 
 @dataclass(frozen=True, slots=True)
 class TimingSummary:
-    """Summary of a list of wall-time samples in seconds."""
+    """Summary of a list of wall-time samples in seconds.
+
+    The samples are sorted. The minimum, median, mean and standard deviation
+    are derived from them, so they cannot disagree with the samples.
+
+    Args:
+        samples: The wall times in seconds, in any order.
+
+    Raises:
+        ValueError: If ``samples`` is empty.
+    """
 
     samples: tuple[float, ...]
-    minimum: float
-    median: float
-    mean: float
-    standard_deviation: float
+
+    def __post_init__(self) -> None:
+        if not self.samples:
+            message = "Cannot summarize an empty sample list"
+            raise ValueError(message)
+        object.__setattr__(self, "samples", tuple(sorted(self.samples)))
+
+    @property
+    def minimum(self) -> float:
+        """The fastest sample."""
+        return self.samples[0]
+
+    @property
+    def median(self) -> float:
+        """The middle sample, or the mean of the two middle ones."""
+        return _statistics.median(self.samples)
+
+    @property
+    def mean(self) -> float:
+        """The arithmetic mean."""
+        return _statistics.fmean(self.samples)
+
+    @property
+    def standard_deviation(self) -> float:
+        """The population standard deviation, ``0.0`` for a single sample."""
+        return _statistics.pstdev(self.samples) if len(self.samples) > 1 else 0.0
 
     @property
     def count(self) -> int:
@@ -80,7 +112,7 @@ class TimingSummary:
         return len(self.samples)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Growth:
     """How a cost grows with the input size: the fitted exponent and the nearest class.
 
@@ -108,28 +140,15 @@ class Growth:
 def summarize(samples: list[float]) -> TimingSummary:
     """Compute the headline statistics over ``samples``.
 
+    It raises ``ValueError`` if ``samples`` is empty.
+
     Args:
         samples: Wall times in seconds.
 
     Returns:
         The sorted samples with their minimum, median, mean and standard deviation.
-
-    Raises:
-        ValueError: If ``samples`` is empty.
     """
-    if not samples:
-        message = "Cannot summarize an empty sample list"
-        raise ValueError(message)
-    sorted_samples = tuple(sorted(samples))
-    return TimingSummary(
-        samples=sorted_samples,
-        minimum=sorted_samples[0],
-        median=_statistics.median(sorted_samples),
-        mean=_statistics.fmean(sorted_samples),
-        standard_deviation=_statistics.pstdev(sorted_samples)
-        if len(sorted_samples) > 1
-        else 0.0,
-    )
+    return TimingSummary(tuple(samples))
 
 
 def subtract_startup(samples: list[float], startup_seconds: float) -> list[float]:
@@ -205,7 +224,7 @@ def estimate_growth(sizes: Sequence[float], values: Sequence[float]) -> Growth |
     exponent = estimate_growth_exponent(sizes, values)
     if exponent is None:
         return None
-    return Growth(exponent, fit_growth_class(sizes, values))
+    return Growth(exponent=exponent, growth_class=fit_growth_class(sizes, values))
 
 
 def fit_growth_class(sizes: Sequence[float], values: Sequence[float]) -> str | None:

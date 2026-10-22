@@ -8,7 +8,7 @@ library, and so a test can compare frames without a terminal.
 """
 
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import overload
 
 from typing_extensions import override
@@ -30,6 +30,7 @@ class Frame:
     """
 
     body: str
+    _: KW_ONLY
     caption: str = ""
     highlighted_indices: tuple[int, ...] = ()
 

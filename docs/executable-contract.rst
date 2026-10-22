@@ -83,8 +83,8 @@ A complete example for the sorting problem, in Python:
    with open(output_path, "wb") as stream:
        stream.write(struct.pack(f"<Q{count}i", count, *values))
 
-The reference implementations in ``examples/sorting/`` (Python and C) also
-show the optional trace.
+The Python reference implementation in ``examples/sorting/`` also writes the
+optional trace; the C one ignores it.
 
 Working directory
 -----------------

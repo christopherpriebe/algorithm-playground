@@ -8,7 +8,7 @@ return a chart as text, which is what a problem puts in a frame;
 
 import math
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from enum import Enum
 from typing import cast
 
@@ -86,11 +86,12 @@ class BarHighlight:
     """Bars drawn in another color, with a legend entry saying why."""
 
     indices: tuple[int, ...]
+    _: KW_ONLY
     color: str
     label: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ChartSeries:
     """One named line of a line chart.
 

@@ -530,7 +530,7 @@ class BuildError(RunnerError):
     """Raised when an implementation's build command fails."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RunResult(Generic[OutputT, TraceT]):
     """The artifacts and measurements produced by a single implementation run.
 

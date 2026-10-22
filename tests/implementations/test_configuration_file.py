@@ -723,7 +723,7 @@ def test_loading_registers_the_modules_as_configuration(
     load_configured_problems(load_configuration(configured_problem_module))
 
     assert list_problem_sources()["configured-variant"] == ProblemSource(
-        ProblemSourceKind.CONFIGURATION, "configuration_test_problems"
+        kind=ProblemSourceKind.CONFIGURATION, detail="configuration_test_problems"
     )
 
 

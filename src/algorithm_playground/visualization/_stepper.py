@@ -72,7 +72,9 @@ def _run(
     screen: "_Screen",
 ) -> None:
     total = len(frames)
-    state = StepperState(0, total, playing=options.auto_advance and total > 1)
+    state = StepperState(
+        index=0, total=total, playing=options.auto_advance and total > 1
+    )
     delay = options.delay_milliseconds / 1000.0
     message = ""
     while True:
@@ -97,7 +99,7 @@ def _run(
                 state = replace(state, index=target)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StepperOptions:
     """Tunables for the interactive stepper."""
 
@@ -105,7 +107,7 @@ class StepperOptions:
     delay_milliseconds: int = 250
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StepperState:
     """Which frame is shown and whether auto-advance is running."""
 
