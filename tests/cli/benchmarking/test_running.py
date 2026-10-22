@@ -20,7 +20,13 @@ from helpers.support import (
     invoke_cli,
     parse_table_rows,
 )
-from helpers.two_dimensions import add_pair, register_two_dimension_problem
+from helpers.two_dimensions import (
+    add_pair,
+    register_exploding_size_check_problem,
+    register_rejecting_minimum_size_problem,
+    register_simple_graph_problem,
+    register_two_dimension_problem,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -593,3 +599,60 @@ def test_a_size_with_leading_zeros_is_a_usage_error(
     assert_exits_with(result, 2)
     assert "plain integer" in result.stderr
     assert result.stdout == ""
+
+
+def test_a_size_the_problem_rejects_is_a_usage_error(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test a size the problem's own rule rejects is refused with the reason before anything runs."""
+    runners = use_fake_runners({"adder": add_pair})
+    name = register_simple_graph_problem()
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder"],
+        *["--sizes", "vertices=3:edges=4", "--no-plot"],
+    )
+
+    assert_exits_with(result, 2)
+    assert "does not accept the size vertices=3:edges=4" in result.stderr
+    assert "holds at most 3 edges" in result.stderr
+    assert runners.calls == []
+
+
+def test_a_size_check_that_raises_ends_the_command_with_its_name(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test a size check that raises is reported by name with exit code 1 and no traceback."""
+    runners = use_fake_runners({"adder": add_pair})
+    name = register_exploding_size_check_problem()
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder"],
+        *["--sizes", "vertices=3:edges=3", "--no-plot"],
+    )
+
+    assert_hook_failure(
+        result,
+        "The problem's check_size hook raised RuntimeError: size check exploded.",
+    )
+    assert runners.calls == []
+
+
+def test_a_problem_that_rejects_its_minimum_size_is_a_usage_error(
+    use_fake_runners: UseFakeRunners,
+) -> None:
+    """Test a problem that rejects its startup size is refused before anything runs."""
+    runners = use_fake_runners({"adder": add_pair})
+    name = register_rejecting_minimum_size_problem()
+
+    result = invoke_cli(
+        *["benchmark", name, "--command", "adder"],
+        *["--sizes", "vertices=3:edges=3", "--no-plot"],
+    )
+
+    assert_exits_with(result, 2)
+    assert (
+        "does not accept the size vertices=1:edges=0: an edge is needed"
+        in result.stderr
+    )
+    assert runners.calls == []

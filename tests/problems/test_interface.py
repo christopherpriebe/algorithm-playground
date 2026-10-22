@@ -418,3 +418,8 @@ def test_an_integer_score_is_kept_as_a_number() -> None:
 
     assert score == 3.0
     assert isinstance(score, float)
+
+
+def test_every_size_is_accepted_by_default(problem: MinimalProblem) -> None:
+    """Test a problem accepts every size of its dimensions unless it says otherwise."""
+    assert problem.check_size(Size(size=5)) is None

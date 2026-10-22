@@ -52,7 +52,7 @@ from algorithm_playground.core._benchmarking import (
     include_failed_implementations,
 )
 from algorithm_playground.core._cases import CaseError, check_sizes, select_generators
-from algorithm_playground.core._dimensions import Size
+from algorithm_playground.core._dimensions import Size, build_minimum_size
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem, has_trace_format
 from algorithm_playground.core._report import convert_benchmark_report_to_json
@@ -83,7 +83,7 @@ def _check_problem_sizes(
     context: CommandContext, problem: AnyProblem, sizes: Sequence[Size]
 ) -> None:
     try:
-        check_sizes(problem, sizes)
+        check_sizes(problem, (build_minimum_size(problem), *sizes))
     except CaseError as error:
         context.fail(str(error))
 

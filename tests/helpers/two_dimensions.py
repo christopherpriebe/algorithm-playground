@@ -17,6 +17,7 @@ from algorithm_playground.authoring import (
     Fixture,
     InputGenerator,
     Problem,
+    Size,
     VerificationResult,
     expect_end_of_stream,
     read_u64,
@@ -128,3 +129,75 @@ def write_pair_adder(path: Path) -> Path:
             stream.write(struct.pack("<Q", vertices + edges))
         """,
     )
+
+
+SIMPLE_GRAPH_NAME = "simple-graph"
+
+
+def count_edges_of_a_complete_graph(vertices: int) -> int:
+    """Count the edges a simple graph with ``vertices`` vertices can hold at most."""
+    return vertices * (vertices - 1) // 2
+
+
+class SimpleGraphProblem(TwoDimensionProblem):
+    """The pair problem with coupled dimensions: no more edges than a simple graph holds."""
+
+    name = SIMPLE_GRAPH_NAME
+    description = "Add the counts of a pair that a simple graph could have."
+
+    @override
+    def check_size(self, size: Size) -> str | None:
+        most = count_edges_of_a_complete_graph(size["vertices"])
+        if size["edges"] > most:
+            return f"a simple graph with {size['vertices']} vertices holds at most {most} edges"
+        return None
+
+
+def register_simple_graph_problem() -> str:
+    """Register the coupled-dimension problem for the rest of the test; return its name."""
+    register_problem(SimpleGraphProblem)
+    return SIMPLE_GRAPH_NAME
+
+
+def is_simple_graph_size(pair: Pair) -> bool:
+    """Tell whether a pair of counts could be a simple graph."""
+    return pair[1] <= count_edges_of_a_complete_graph(pair[0])
+
+
+EXPLODING_SIZE_CHECK_NAME = "exploding-size-check"
+
+
+class ExplodingSizeCheckProblem(TwoDimensionProblem):
+    """The pair problem whose size check raises, to test how the commands cope."""
+
+    name = EXPLODING_SIZE_CHECK_NAME
+
+    @override
+    def check_size(self, size: Size) -> str | None:
+        message = "size check exploded"
+        raise RuntimeError(message)
+
+
+def register_exploding_size_check_problem() -> str:
+    """Register the problem whose size check raises; return its name."""
+    register_problem(ExplodingSizeCheckProblem)
+    return EXPLODING_SIZE_CHECK_NAME
+
+
+REJECTS_MINIMUM_NAME = "rejects-minimum"
+
+
+class RejectingMinimumSizeProblem(TwoDimensionProblem):
+    """The pair problem whose size check rejects its own minimum size (no edge)."""
+
+    name = REJECTS_MINIMUM_NAME
+
+    @override
+    def check_size(self, size: Size) -> str | None:
+        return "an edge is needed" if size["edges"] == 0 else None
+
+
+def register_rejecting_minimum_size_problem() -> str:
+    """Register the problem that rejects its minimum size; return its name."""
+    register_problem(RejectingMinimumSizeProblem)
+    return REJECTS_MINIMUM_NAME

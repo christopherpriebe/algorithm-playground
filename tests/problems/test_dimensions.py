@@ -13,6 +13,7 @@ from algorithm_playground.core import (
     CasePlan,
     Dimension,
     GeneratedOrigin,
+    HookError,
     InputGenerator,
     Size,
     build_cases,
@@ -27,7 +28,12 @@ from algorithm_playground.core import (
     resolve_case,
 )
 from algorithm_playground.problems.sorting import SortingProblem
-from helpers.two_dimensions import Pair, TwoDimensionProblem
+from helpers.two_dimensions import (
+    Pair,
+    SimpleGraphProblem,
+    TwoDimensionProblem,
+    is_simple_graph_size,
+)
 
 TWO_DIMENSIONS = TwoDimensionProblem.dimensions
 ONE_DIMENSION = (Dimension("size"),)
@@ -436,3 +442,123 @@ def test_every_planned_case_can_be_rebuilt_from_its_identifier(
     rebuilt: list[Any] = [resolve_case(pairs, case.identifier) for case in cases]
 
     assert rebuilt == list(cases)
+
+
+def build_simple_graph_variant(**members: object) -> SimpleGraphProblem:
+    """Build the coupled-dimension problem with the given members replaced."""
+    return type("Variant", (SimpleGraphProblem,), members)()
+
+
+def reject_every_size(_: SimpleGraphProblem, _size: Size) -> str:
+    """Reject every size, as a problem that can never be sized does."""
+    return "no size is ever right"
+
+
+def reject_the_minimum_size(_: SimpleGraphProblem, size: Size) -> str | None:
+    """Reject the size with no edge, which is the minimum size of the problem."""
+    return "an edge is needed" if size["edges"] == 0 else None
+
+
+def test_a_size_the_problem_accepts_passes_the_check() -> None:
+    """Test a size the problem's own rule accepts passes the check."""
+    check_sizes(SimpleGraphProblem(), (Size(vertices=3, edges=3),))
+
+
+def test_a_size_the_problem_rejects_fails_the_check_with_its_reason() -> None:
+    """Test a size the problem's own rule rejects is refused with the rule's reason."""
+    with pytest.raises(
+        CaseError,
+        match=(
+            r"does not accept the size vertices=3:edges=4: "
+            r"a simple graph with 3 vertices holds at most 3 edges"
+        ),
+    ):
+        check_sizes(SimpleGraphProblem(), (Size(vertices=3, edges=4),))
+
+
+def test_a_size_check_that_raises_is_a_hook_error() -> None:
+    """Test a size check that raises is reported as a failure of that hook."""
+
+    def explode(_: SimpleGraphProblem, _size: Size) -> str | None:
+        message = "size check exploded"
+        raise RuntimeError(message)
+
+    problem = build_simple_graph_variant(check_size=explode)
+
+    with pytest.raises(HookError, match="check_size hook raised RuntimeError"):
+        check_sizes(problem, (Size(vertices=3, edges=3),))
+
+
+def test_a_size_check_that_returns_something_else_is_a_hook_error() -> None:
+    """Test a size check that returns neither text nor None is reported as a hook failure."""
+    problem = build_simple_graph_variant(check_size=lambda _self, _size: False)
+
+    with pytest.raises(HookError, match=r"check_size hook raised TypeError.*bool"):
+        check_sizes(problem, (Size(vertices=3, edges=3),))
+
+
+def test_a_plan_builds_only_sizes_the_problem_accepts() -> None:
+    """Test every generated case of a coupled-dimension problem satisfies the problem's rule."""
+    problem = SimpleGraphProblem()
+    plan = CasePlan(include_fixtures=False, random_case_count=30, seed=1)
+
+    generated = collect_pairs(problem, plan)
+
+    assert len(generated) == 30
+    assert all(is_simple_graph_size(pair) for pair in generated)
+    assert min(pair[0] for pair in generated) <= 3
+    assert build_cases(problem, plan) == build_cases(problem, plan)
+
+
+def test_a_plan_that_can_find_no_accepted_size_is_an_error() -> None:
+    """Test a plan fails with the rule's last reason when no size it draws is accepted."""
+    problem = build_simple_graph_variant(check_size=reject_every_size)
+
+    with pytest.raises(
+        CaseError, match=r"could not find a size.*accepts.*no size is ever right"
+    ):
+        build_cases(problem, CasePlan(include_fixtures=False, random_case_count=1))
+
+
+def test_an_identifier_with_a_size_the_problem_rejects_is_an_error() -> None:
+    """Test a generated identifier whose size the problem rejects cannot be rebuilt."""
+    with pytest.raises(CaseError, match="does not accept the size vertices=3:edges=4"):
+        resolve_case(SimpleGraphProblem(), "generated:exact:vertices=3:edges=4:seed=1")
+
+
+def test_the_startup_size_must_be_accepted() -> None:
+    """Test a problem that rejects its own minimum size has no startup case."""
+    problem = build_simple_graph_variant(check_size=reject_the_minimum_size)
+
+    with pytest.raises(
+        CaseError,
+        match="does not accept the size vertices=1:edges=0: an edge is needed",
+    ):
+        build_startup_case(problem, seed=1)
+
+
+def test_an_empty_reason_still_rejects_the_size() -> None:
+    """Test a size check that returns empty text rejects the size, with a placeholder reason."""
+    problem = build_simple_graph_variant(check_size=lambda _self, _size: "")
+
+    with pytest.raises(
+        CaseError,
+        match=r"does not accept the size vertices=3:edges=3: \(no reason given\)",
+    ):
+        check_sizes(problem, (Size(vertices=3, edges=3),))
+
+
+def test_a_plan_gives_up_after_a_hundred_rejected_draws() -> None:
+    """Test the sampler asks the problem's rule a hundred times for one case before giving up."""
+    asked: list[Size] = []
+
+    def reject_and_count(_: SimpleGraphProblem, size: Size) -> str:
+        asked.append(size)
+        return "no size is ever right"
+
+    problem = build_simple_graph_variant(check_size=reject_and_count)
+
+    with pytest.raises(CaseError, match="after 100 attempts"):
+        build_cases(problem, CasePlan(include_fixtures=False, random_case_count=1))
+
+    assert len(asked) == 100

@@ -210,6 +210,9 @@ Where to go next
   element that differs.
 * Write the rule that every input must keep (an array that has to be sorted) as
   ``check_input``, so that shrinking skips candidates that break it.
+* When the dimensions of a size depend on each other (a simple graph holds at
+  most ``vertices * (vertices - 1) / 2`` edges), write the rule as
+  ``check_size`` so that an impossible size is refused with your reason.
 * Add more generators that stress different shapes of input; each one is a
   distribution that ``test --distribution`` can select and that ``benchmark``
   can use.

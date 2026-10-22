@@ -15,7 +15,11 @@ from helpers.support import (
     invoke_cli,
     read_logged_inputs,
 )
-from helpers.two_dimensions import register_two_dimension_problem, write_pair_adder
+from helpers.two_dimensions import (
+    register_simple_graph_problem,
+    register_two_dimension_problem,
+    write_pair_adder,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -499,3 +503,14 @@ def test_a_plain_number_is_a_usage_error_for_several_dimensions(tmp_path: Path) 
 
     assert_exits_with(result, 2)
     assert "vertices=N:edges=N" in result.stderr
+
+
+def test_a_size_the_problem_rejects_is_a_usage_error_for_debug(tmp_path: Path) -> None:
+    """Test debug refuses a size the problem's own rule rejects, with the reason."""
+    name = register_simple_graph_problem()
+    adder = write_pair_adder(tmp_path / "adder.py")
+
+    result = invoke_cli("debug", name, str(adder), "--size", "vertices=3:edges=4")
+
+    assert_exits_with(result, 2)
+    assert "does not accept the size vertices=3:edges=4" in result.stderr

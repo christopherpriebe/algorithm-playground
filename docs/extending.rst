@@ -116,7 +116,9 @@ Optional class attributes, each with a working default:
    (the dimensions vary independently), ``benchmark --sizes`` and ``--case``
    refuse sizes below a minimum with a clear message, ``debug`` starts from 16 for every
    dimension, raised to the dimension's minimum, and validation samples the generators from them. A problem that
-   declares nothing has the one dimension ``size``.
+   declares nothing has the one dimension ``size``. When the dimensions
+   depend on each other (a simple graph holds at most ``vertices * (vertices -
+   1) / 2`` edges), say so in ``check_size``.
 
 ``growth_dimension`` (default ``None``)
    The name of the dimension that the growth row of a benchmark follows (the
@@ -160,6 +162,25 @@ Optional methods, each with a working default:
    validation applies it to the fixtures, the generated samples and the shrink
    candidates, and the shrinker skips the candidates it rejects, so ``shrink`` can
    be generous and does not have to repeat the rule.
+
+``check_size(size)``
+   Say why a combination of dimension values is not one the problem accepts, as
+   text, or return ``None`` (the default accepts every size at or above the
+   minimums). Use it when the dimensions are coupled, so that an impossible
+   size is refused up front with your reason instead of being clamped by a
+   generator and mislabelled. It is consulted for every size the command line
+   or a caller names (``benchmark --sizes``, ``debug --size``, ``--case``), for
+   the startup size (``benchmark`` checks it together with ``--sizes`` before
+   it builds or runs anything), and for every size the ``test`` plan draws: a rejected
+   draw is redrawn, the first time from the usual stratified draw and then from
+   uniformly random fractions of the case's own seeded generator, and after 100
+   rejected attempts the plan fails with the last reason. The minimum size must
+   be accepted. Any text, even empty, counts as a rejection (an empty reason is
+   shown as ``(no reason given)``). ``debug`` without ``--size`` uses 16 for
+   every dimension, raised to its minimum; a problem whose rule rejects that
+   default needs ``--size``. Validation checks that the minimum is accepted,
+   that the hook returns text or ``None``, and that it does not raise, at every
+   size it samples; it samples generators only at sizes the hook accepts.
 
 ``describe_input(input_data, *, limit)`` and ``describe_output(output, *, limit, focus=None)``
    Text for failure reports, in at most about ``limit`` characters (the harness
@@ -440,7 +461,8 @@ list of findings (empty means valid);
 
 It checks that the problem has a name and a description, ``dimensions`` that are
 a non-empty tuple of uniquely named ``Dimension`` objects, a ``growth_dimension``
-that names one of them (or ``None``), a ``debug_generator`` that names one of its
+that names one of them (or ``None``), a ``check_size`` that accepts the minimum
+size and returns text or ``None``, a ``debug_generator`` that names one of its
 generators, and ``operation_names`` that are unique text; that fixture names are
 unique (construction already rejects an empty one), every fixture is accepted by
 ``check_input`` and serializes; that generator names are unique (construction

@@ -43,7 +43,7 @@ from algorithm_playground.core._binary_format import (
 )
 from algorithm_playground.core._cases import Fixture, InputGenerator
 from algorithm_playground.core._description import describe_sequence, truncate_text
-from algorithm_playground.core._dimensions import Dimension
+from algorithm_playground.core._dimensions import Dimension, Size
 from algorithm_playground.core._errors import AlgorithmPlaygroundError
 from algorithm_playground.core._frames import Frame, FrameSequence
 from algorithm_playground.core._problem import Problem, VerificationResult
@@ -75,6 +75,7 @@ __all__ = [
     "FrameSequence",
     "InputGenerator",
     "Problem",
+    "Size",
     "StateTimeline",
     "VerificationResult",
     "assert_valid_problem",

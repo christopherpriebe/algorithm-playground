@@ -9,7 +9,7 @@ benchmarking, validation) and a problem supplies only what is specific to it:
 * the correctness check (``verify``).
 
 Everything else has a working default: ``expected_output``, ``check_input``,
-``describe_input`` and ``describe_output``, ``shrink``, ``deserialize_input``,
+``check_size``, ``describe_input`` and ``describe_output``, ``shrink``, ``deserialize_input``,
 ``deserialize_trace`` with ``operation_counts`` and ``trace_warnings``, the
 frames that ``debug`` steps through (``input_output_frame`` and
 ``trace_frames``), and the class attributes ``dimensions``,
@@ -33,7 +33,7 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 from algorithm_playground.core._cases import Fixture, InputGenerator, InputT
 from algorithm_playground.core._description import truncate_text
-from algorithm_playground.core._dimensions import Dimension
+from algorithm_playground.core._dimensions import Dimension, Size
 from algorithm_playground.core._frames import Frame
 
 __all__ = [
@@ -245,6 +245,24 @@ class Problem(ABC, Generic[InputT, OutputT, TraceT]):
         Returns:
             The reason the input is invalid, or ``None``. The default accepts
             everything.
+        """
+        return None
+
+    def check_size(self, size: Size) -> str | None:  # noqa: ARG002  default hook, signature fixed by its overrides
+        """Say why a combination of dimension values is not one the problem accepts, as text, or return ``None``.
+
+        A rule that couples the dimensions (a simple graph holds at most
+        ``vertices * (vertices - 1) / 2`` edges) is written here once. It is
+        consulted for every size the command line or a caller names, for the
+        startup size, and for every size the test plan draws, which redraws a
+        rejected one. Any text, even empty, is a rejection. The minimum size must be accepted.
+
+        Args:
+            size: The value of each dimension, all at or above the minimums.
+
+        Returns:
+            The reason the size is not accepted, or ``None``. The default
+            accepts every size at or above the minimums.
         """
         return None
 

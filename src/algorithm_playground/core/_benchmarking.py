@@ -44,7 +44,12 @@ from algorithm_playground.core._cases import (
     select_generators,
 )
 from algorithm_playground.core._description import describe_error
-from algorithm_playground.core._dimensions import Dimension, Size, get_growth_dimension
+from algorithm_playground.core._dimensions import (
+    Dimension,
+    Size,
+    build_minimum_size,
+    get_growth_dimension,
+)
 from algorithm_playground.core._hooks import HookError
 from algorithm_playground.core._implementation import Implementation
 from algorithm_playground.core._problem import AnyProblem, has_trace_format
@@ -1020,7 +1025,7 @@ def run_benchmark(
 
     It raises ``ValueError`` if there is no implementation or names repeat,
     ``CaseError`` for a distribution the problem does not define and for a size
-    that is not one the problem accepts, and ``HookError`` when the problem's
+    that is not one the problem accepts (the startup size included), and ``HookError`` when the problem's
     ``generators`` hook raises or the generator of the startup input does.
 
     Args:
@@ -1036,7 +1041,7 @@ def run_benchmark(
         The report, whose settings list the distributions it measured.
     """
     validate_implementations(implementations)
-    check_sizes(problem, settings.sizes)
+    check_sizes(problem, (build_minimum_size(problem), *settings.sizes))
     canonical_sizes = tuple(
         Size(
             **{dimension.name: size[dimension.name] for dimension in problem.dimensions}

@@ -30,6 +30,11 @@ from helpers.fakes import (
     sort_correctly,
 )
 from helpers.sizes import build_sizes
+from helpers.two_dimensions import (
+    RejectingMinimumSizeProblem,
+    SimpleGraphProblem,
+    add_pair,
+)
 
 
 class NeedsTwoValuesProblem(SortingProblem):
@@ -468,3 +473,38 @@ def test_an_unknown_distribution_is_an_error_naming_the_available_ones() -> None
         CaseError, match=r"Unknown distribution 'nope'.*uniform.*median_of_three"
     ):
         run_fake_benchmark({"a": sort_correctly}, distributions=("nope",))
+
+
+def test_a_size_the_problem_rejects_is_an_error_before_anything_runs() -> None:
+    """Test a benchmark size the problem's own rule rejects is refused before any run."""
+    runners = FakeRunners({"adder": add_pair})
+
+    with pytest.raises(CaseError, match="does not accept the size vertices=3:edges=4"):
+        run_benchmark(
+            SimpleGraphProblem(),
+            build_named_implementations("adder"),
+            build_settings(sizes=(Size(vertices=3, edges=4),)),
+            runner_factory=runners,
+        )
+
+    assert runners.calls == []
+
+
+def test_a_problem_that_rejects_its_minimum_size_is_an_error_before_anything_runs() -> (
+    None
+):
+    """Test the startup size is checked against the problem's rule before any run."""
+    runners = FakeRunners({"adder": add_pair})
+
+    with pytest.raises(
+        CaseError,
+        match="does not accept the size vertices=1:edges=0: an edge is needed",
+    ):
+        run_benchmark(
+            RejectingMinimumSizeProblem(),
+            build_named_implementations("adder"),
+            build_settings(sizes=(Size(vertices=3, edges=3),)),
+            runner_factory=runners,
+        )
+
+    assert runners.calls == []

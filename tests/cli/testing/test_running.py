@@ -19,6 +19,11 @@ from helpers.support import (
     invoke_cli,
     parse_table_rows,
 )
+from helpers.two_dimensions import (
+    add_pair,
+    register_exploding_size_check_problem,
+    register_simple_graph_problem,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -406,3 +411,36 @@ def test_the_summary_names_the_mean_score_of_a_scored_problem(
     assert result.exit_code == 0, result.stdout + result.stderr
     assert "lazy: 2/2 cases passed" in result.stdout
     assert "mean inversions 23 over 2 scored cases" in result.stdout
+
+
+def test_a_case_whose_size_the_problem_rejects_is_a_usage_error(
+    use_fake_test_runners: UseFakeTestRunners,
+) -> None:
+    """Test a named case whose size the problem's own rule rejects runs nothing."""
+    runners = use_fake_test_runners({"adder": add_pair})
+    name = register_simple_graph_problem()
+
+    result = invoke_cli(
+        *["test", name, "--command", "adder"],
+        *["--case", "generated:exact:vertices=3:edges=4:seed=1"],
+    )
+
+    assert_exits_with(result, 2)
+    assert "does not accept the size vertices=3:edges=4" in result.stderr
+    assert runners.calls == []
+
+
+def test_a_size_check_that_raises_ends_the_test_command_with_its_name(
+    use_fake_test_runners: UseFakeTestRunners,
+) -> None:
+    """Test a size check that raises while the cases are planned names the hook and exits with 1."""
+    runners = use_fake_test_runners({"adder": add_pair})
+    name = register_exploding_size_check_problem()
+
+    result = invoke_cli("test", name, "--command", "adder", "--no-fixtures")
+
+    assert_hook_failure(
+        result,
+        "The problem's check_size hook raised RuntimeError: size check exploded.",
+    )
+    assert runners.calls == []

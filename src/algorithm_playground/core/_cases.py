@@ -53,6 +53,7 @@ __all__ = [
     "DEFAULT_RANDOM_CASE_COUNT",
     "FIXTURE_PREFIX",
     "GENERATED_PREFIX",
+    "MAXIMUM_SIZE_ATTEMPTS",
     "SHRUNK_PREFIX",
     "AnyCase",
     "AnyFixture",
@@ -86,6 +87,12 @@ GENERATED_PREFIX = "generated:"
 SHRUNK_PREFIX = "shrunk:"
 
 DEFAULT_RANDOM_CASE_COUNT = 20
+
+# How many sizes a plan draws for one case before it gives up on finding an accepted one.
+MAXIMUM_SIZE_ATTEMPTS = 100
+
+# What stands in for the text of a rejection that is empty.
+_NO_REASON_GIVEN = "(no reason given)"
 
 # A generated identifier is at least NAME and seed=N once the prefix is removed.
 _MINIMUM_GENERATED_PART_COUNT = 2
@@ -207,22 +214,30 @@ class _SizeSampler:
     permutations: Mapping[str, Sequence[int]]
     count: int
 
-    def sample(self, index: int, random_generator: random.Random) -> Size:
+    def sample(
+        self, index: int, random_generator: random.Random, *, is_stratified: bool = True
+    ) -> Size:
         """Draw the size of the case at position ``index``.
 
         Args:
             index: The position of the case among the generated cases.
             random_generator: The generator of the case, which supplies the
                 jitter inside each stratum.
+            is_stratified: Whether the fractions follow the strata of the
+                plan. Otherwise every dimension's fraction is drawn uniformly
+                at random, as a redraw after a rejected size does.
 
         Returns:
             The size.
         """
         values: dict[str, int] = {}
         for dimension in self.dimensions:
-            permutation = self.permutations.get(dimension.name)
-            stratum = index if permutation is None else permutation[index]
-            position = (stratum + random_generator.random()) / self.count
+            if is_stratified:
+                permutation = self.permutations.get(dimension.name)
+                stratum = index if permutation is None else permutation[index]
+                position = (stratum + random_generator.random()) / self.count
+            else:
+                position = random_generator.random()
             maximum = self.maximum_size[dimension.name]
             span = maximum - dimension.minimum
             values[dimension.name] = min(
@@ -259,7 +274,42 @@ def _build_size_sampler(
     )
 
 
+def _draw_accepted_size(
+    problem: "AnyProblem",
+    index: int,
+    random_generator: random.Random,
+    sampler: _SizeSampler,
+) -> Size:
+    """Draw sizes for the case at ``index`` until the problem accepts one.
+
+    Args:
+        problem: The problem, which may reject a size.
+        index: The position of the case among the generated cases.
+        random_generator: The generator of the case.
+        sampler: The draw of the sizes.
+
+    Returns:
+        The first accepted size.
+
+    Raises:
+        CaseError: If the problem rejects every size drawn.
+    """
+    reason = _NO_REASON_GIVEN
+    for attempt in range(MAXIMUM_SIZE_ATTEMPTS):
+        size = sampler.sample(index, random_generator, is_stratified=attempt == 0)
+        rejection = _find_size_rejection(problem, size)
+        if rejection is None:
+            return size
+        reason = rejection or _NO_REASON_GIVEN
+    message = (
+        f"Problem '{problem.name}' could not find a size it accepts for generated "
+        f"case {index} after {MAXIMUM_SIZE_ATTEMPTS} attempts; the last reason: {reason}"
+    )
+    raise CaseError(message)
+
+
 def _random_case(
+    problem: "AnyProblem",
     plan: "CasePlan",
     index: int,
     *,
@@ -269,6 +319,7 @@ def _random_case(
     """Build the generated case at position ``index`` of ``plan``.
 
     Args:
+        problem: The problem the case belongs to.
         plan: The plan the case belongs to.
         index: The position of the case among the generated cases.
         sampler: The draw of the sizes.
@@ -281,7 +332,7 @@ def _random_case(
         f"algorithm-playground:{plan.seed}:{index}"
     )
     seed = random_generator.randrange(2**32)
-    size = sampler.sample(index, random_generator)
+    size = _draw_accepted_size(problem, index, random_generator, sampler)
     generator = generators[(index + index // len(generators)) % len(generators)]
     return generate_case(generator, size=size, seed=seed)
 
@@ -445,6 +496,14 @@ class CasePlan:
     dimension, picks the stratum of each case, so the dimensions vary
     independently while each of them still covers its whole range.
 
+    The problem may reject a combination of values through its ``check_size``
+    hook. The first draw of a case is the stratified one; when the problem
+    rejects it, each later attempt draws every dimension's fraction uniformly
+    at random from the case's own seeded generator, squares it and clamps it
+    between the minimum and the maximum like the stratified draw, so the plan
+    stays deterministic. After ``MAXIMUM_SIZE_ATTEMPTS`` rejected attempts the
+    plan raises :class:`CaseError`.
+
     Args:
         include_fixtures: Whether the problem's fixtures are part of the run.
         random_case_count: The number of generated cases.
@@ -489,7 +548,8 @@ def get_default_generator(problem: "AnyProblem") -> AnyInputGenerator:
 def build_startup_case(problem: "AnyProblem", seed: int) -> AnyCase:
     """Build the smallest input of the default generator: the input startup time is measured on.
 
-    Raise :class:`CaseError` if the problem defines no generator.
+    Raise :class:`CaseError` if the problem defines no generator or does not accept
+    its minimum size.
     Raise :class:`~algorithm_playground.core.HookError` if a hook fails.
 
     Args:
@@ -499,9 +559,10 @@ def build_startup_case(problem: "AnyProblem", seed: int) -> AnyCase:
     Returns:
         The case, at the problem's minimum size.
     """
-    return generate_case(
-        get_default_generator(problem), size=build_minimum_size(problem), seed=seed
-    )
+    generator = get_default_generator(problem)
+    size = build_minimum_size(problem)
+    check_sizes(problem, (size,))
+    return generate_case(generator, size=size, seed=seed)
 
 
 def _require_dimensions(problem: "AnyProblem", size: Size, subject: str) -> None:
@@ -524,6 +585,30 @@ def _require_dimensions(problem: "AnyProblem", size: Size, subject: str) -> None
         raise CaseError(message)
 
 
+def _find_size_rejection(problem: "AnyProblem", size: Size) -> str | None:
+    """Ask the problem's ``check_size`` hook about a size.
+
+    Args:
+        problem: The problem.
+        size: The size to ask about.
+
+    Returns:
+        The reason the problem does not accept the size, or ``None``.
+    """
+
+    def ask() -> str | None:
+        # The hook is problem code, so the result is checked as untyped.
+        reason: object = problem.check_size(size)
+        if reason is not None and not isinstance(reason, str):
+            message = (
+                f"it returned a {type(reason).__name__} where text or None belongs"
+            )
+            raise TypeError(message)
+        return reason
+
+    return call_hook("check_size", ask)
+
+
 def check_sizes(problem: "AnyProblem", sizes: Sequence[Size]) -> None:
     """Require every size to be one the problem accepts.
 
@@ -532,8 +617,9 @@ def check_sizes(problem: "AnyProblem", sizes: Sequence[Size]) -> None:
         sizes: The sizes to check.
 
     Raises:
-        CaseError: If a size names other dimensions than the problem has, or is
-            below the minimum of a dimension.
+        CaseError: If a size names other dimensions than the problem has, is
+            below the minimum of a dimension, or is one the problem's
+            ``check_size`` hook rejects.
     """
     for size in sizes:
         _require_dimensions(problem, size, "a size")
@@ -547,6 +633,14 @@ def check_sizes(problem: "AnyProblem", sizes: Sequence[Size]) -> None:
             message = (
                 f"Problem '{problem.name}' needs a '{dimension.name}' of at least "
                 f"{dimension.minimum}, but the sizes include {listing}"
+            )
+            raise CaseError(message)
+    for size in sizes:
+        reason = _find_size_rejection(problem, size)
+        if reason is not None:
+            message = (
+                f"Problem '{problem.name}' does not accept the size {size}: "
+                f"{reason or _NO_REASON_GIVEN}"
             )
             raise CaseError(message)
 
@@ -593,7 +687,7 @@ def build_cases(problem: "AnyProblem", plan: CasePlan) -> tuple[AnyCase, ...]:
     dimensions vary independently. The generator of a position is
     ``(position + position // count) % count``, so every generator gets small
     and large sizes alike instead of one generator getting all the small
-    ones.
+    ones. A size the problem rejects is redrawn; see :class:`CasePlan` for the rule.
 
     Raise :class:`~algorithm_playground.core.HookError` if a hook fails.
 
@@ -606,8 +700,8 @@ def build_cases(problem: "AnyProblem", plan: CasePlan) -> tuple[AnyCase, ...]:
 
     Raises:
         CaseError: If the plan names an unknown generator, its maximum size names other
-            dimensions than the problem has or is below the minimum of one, or the
-            problem defines no generator.
+            dimensions than the problem has or is below the minimum of one, the
+            problem defines no generator, or no size it accepts is found for a case.
     """
     cases = _fixture_cases(problem) if plan.include_fixtures else []
     if plan.random_case_count == 0:
@@ -630,7 +724,7 @@ def build_cases(problem: "AnyProblem", plan: CasePlan) -> tuple[AnyCase, ...]:
     generators = select_generators(problem, plan.generator_names)
     sampler = _build_size_sampler(plan, problem.dimensions, maximum_size)
     cases.extend(
-        _random_case(plan, index, sampler=sampler, generators=generators)
+        _random_case(problem, plan, index, sampler=sampler, generators=generators)
         for index in range(plan.random_case_count)
     )
     return tuple(cases)
@@ -687,7 +781,7 @@ def resolve_case(problem: "AnyProblem", identifier: str) -> AnyCase:
 
     Raises:
         CaseError: If the identifier is malformed or names no fixture, generator or size
-            the problem has.
+            the problem has, or a size the problem rejects.
     """
     origin = parse_case_identifier(identifier)
     if isinstance(origin, FixtureOrigin):

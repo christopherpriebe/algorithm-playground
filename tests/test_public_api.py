@@ -63,6 +63,7 @@ EXPECTED_NAMES = {
     "FrameSequence",
     "InputGenerator",
     "Problem",
+    "Size",
     "StateTimeline",
     "VerificationResult",
     "assert_valid_problem",

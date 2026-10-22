@@ -100,6 +100,7 @@ class _Validator:
     def __init__(self, problem: AnyProblem, seed: int, scratch: Path) -> None:
         self._problem = problem
         self._seed = seed
+        self._has_failed_size_check = False
         self._scratch = scratch
         self._findings: list[str] = []
         self._frames_checked = 0
@@ -128,6 +129,7 @@ class _Validator:
         self._check_operation_names()
         self._check_score_name()
         if dimensions is not None:
+            self._check_minimum_size(dimensions)
             for generator in generators:
                 samples.extend(self._generated_samples(generator, dimensions))
 
@@ -173,6 +175,41 @@ class _Validator:
             )
             usable = False
         return cast("tuple[Dimension, ...]", dimensions) if usable else None
+
+    def _check_minimum_size(self, dimensions: tuple[Dimension, ...]) -> None:
+        size = Size(**{dimension.name: dimension.minimum for dimension in dimensions})
+        reason = self._size_rejection(size)
+        if reason is not None:
+            self._record(f"check_size() rejects the minimum size {size}: {reason}")
+
+    def _size_rejection(self, size: Size) -> str | None:
+        """Return why ``check_size`` rejects ``size``, or ``None`` if it accepts it.
+
+        Args:
+            size: The size to ask about. A hook that raised or misreturned
+                once is not asked again, so its failure is recorded once.
+
+        Returns:
+            The reason, or ``None``.
+        """
+        if self._has_failed_size_check:
+            return None
+        # The hook is problem code, so the result is checked as untyped.
+        try:
+            reason = cast("object", self._problem.check_size(size))
+        except Exception as error:  # noqa: BLE001  the hooks under validation are problem code
+            self._has_failed_size_check = True
+            self._record(f"check_size() raised for {size}: {describe_error(error)}")
+            return None
+        if reason is None:
+            return None
+        if not isinstance(reason, str):
+            self._has_failed_size_check = True
+            self._record(
+                f"check_size() must return text or None, got {type(reason).__name__}"
+            )
+            return None
+        return reason
 
     def _check_debug_generator(self, generators: list[AnyInputGenerator]) -> None:
         name = getattr(type(self._problem), "debug_generator", None)
@@ -324,6 +361,8 @@ class _Validator:
                     for dimension in dimensions
                 }
             )
+            if self._size_rejection(size) is not None:
+                continue
             subject = f"generator '{generator.name}' at {size}"
 
             generate = partial(self._generate_sample, generator, size)

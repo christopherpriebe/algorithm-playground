@@ -12,13 +12,19 @@ from algorithm_playground.core import (
     Fixture,
     InputGenerator,
     Problem,
+    Size,
     VerificationResult,
     assert_valid_problem,
     validate_problem,
 )
 from algorithm_playground.problems.sorting import SortingProblem
 from helpers.scoring import NearSortingProblem
-from helpers.two_dimensions import Pair, TwoDimensionProblem
+from helpers.two_dimensions import (
+    Pair,
+    SimpleGraphProblem,
+    TwoDimensionProblem,
+    generate_pair,
+)
 
 
 def generate_values(random_generator: random.Random, size: int) -> list[int]:
@@ -700,5 +706,105 @@ def test_a_named_score_that_the_verifier_does_not_give_is_reported() -> None:
     assert any(
         finding.startswith("verify() returned no score for fixture")
         and "'inversions'" in finding
+        for finding in findings
+    )
+
+
+def build_simple_graph_variant(**members: object) -> SimpleGraphProblem:
+    """Build the (valid) coupled-dimension problem with the given members replaced."""
+    return type("Variant", (SimpleGraphProblem,), members)()
+
+
+def test_a_problem_with_coupled_dimensions_is_valid() -> None:
+    """Test a problem whose rule couples its dimensions passes validation."""
+    assert validate_problem(SimpleGraphProblem()) == []
+
+
+def test_a_size_check_that_rejects_the_minimum_size_is_reported() -> None:
+    """Test a size check that rejects the minimum size is a finding with the reason."""
+
+    def reject_no_edges(_: SimpleGraphProblem, size: Size) -> str | None:
+        return "an edge is needed" if size["edges"] == 0 else None
+
+    findings = validate_problem(build_simple_graph_variant(check_size=reject_no_edges))
+
+    assert (
+        "check_size() rejects the minimum size vertices=1:edges=0: an edge is needed"
+        in findings
+    )
+
+
+def test_a_size_check_must_return_text_or_none() -> None:
+    """Test a size check that returns a boolean is a finding."""
+    problem = build_simple_graph_variant(check_size=lambda _self, _size: False)
+
+    findings = validate_problem(problem)
+
+    assert "check_size() must return text or None, got bool" in findings
+
+
+def test_a_size_check_that_raises_is_reported() -> None:
+    """Test a size check that raises is a finding that names the error."""
+
+    def explode(_: SimpleGraphProblem, _size: Size) -> str | None:
+        message = "size check exploded"
+        raise RuntimeError(message)
+
+    findings = validate_problem(build_simple_graph_variant(check_size=explode))
+
+    assert any(
+        finding.startswith("check_size() raised for")
+        and "RuntimeError: size check exploded" in finding
+        for finding in findings
+    )
+
+
+def test_generators_are_not_sampled_at_sizes_the_problem_rejects() -> None:
+    """Test validation samples a generator only at sizes the problem's rule accepts."""
+    sampled: list[Pair] = []
+
+    def record_pair(
+        random_generator: random.Random, *, vertices: int, edges: int
+    ) -> Pair:
+        sampled.append((vertices, edges))
+        return generate_pair(random_generator, vertices=vertices, edges=edges)
+
+    def reject_small_graphs_with_edges(_: SimpleGraphProblem, size: Size) -> str | None:
+        if size["edges"] > 0 and size["vertices"] < 10:
+            return "a graph with fewer than ten vertices has no edges here"
+        return None
+
+    def provide_generator(_: SimpleGraphProblem) -> tuple[InputGenerator[Pair]]:
+        return (
+            InputGenerator("recording", description="records", generate=record_pair),
+        )
+
+    problem = build_simple_graph_variant(
+        check_size=reject_small_graphs_with_edges, generators=provide_generator
+    )
+
+    findings = validate_problem(problem)
+
+    assert findings == []
+    assert sampled
+    assert all(edges == 0 or vertices >= 10 for vertices, edges in sampled)
+
+
+def test_a_size_check_that_raises_at_larger_sizes_is_reported() -> None:
+    """Test a size check that accepts the minimum but raises elsewhere is still a finding."""
+
+    def explode_beyond_one_vertex(_: SimpleGraphProblem, size: Size) -> str | None:
+        if size["vertices"] > 1:
+            message = "size check exploded"
+            raise RuntimeError(message)
+        return None
+
+    findings = validate_problem(
+        build_simple_graph_variant(check_size=explode_beyond_one_vertex)
+    )
+
+    assert any(
+        finding.startswith("check_size() raised for")
+        and "RuntimeError: size check exploded" in finding
         for finding in findings
     )
