@@ -39,6 +39,13 @@ Session         What it does
 ``bump``        bumps the version (not default)
 ==============  ==============================================================
 
+Branches
+--------
+
+``master`` holds releases only. ``dev`` accumulates feature pull requests,
+squash-merged. Feature work happens on ``dev-<name>`` branches cut from
+``dev``, and pull requests target ``dev``.
+
 Agents
 ------
 
@@ -50,14 +57,19 @@ committed so every contributor's agent behaves the same.
 Releasing
 ---------
 
+From ``dev``, with a clean tree and nothing on ``master`` that ``dev`` lacks:
+
 .. code-block:: console
 
    uv run nox -s bump -- minor
    uv run nox
    git commit -am "chore(release): v$(uv version --short)"
+   git switch master && git merge --ff-only dev
    git tag -a "v$(uv version --short)" -m "v$(uv version --short)"
-   git push --follow-tags
+   git switch dev
+   git push origin dev master --follow-tags
 
 The tag is annotated because ``--follow-tags`` pushes only annotated tags.
-Pushing a ``v*`` tag runs the release workflow, which builds the sdist and wheel
+Pushing a ``v*`` tag runs the release workflow, which checks that the tag is
+on ``master`` and builds the sdist and wheel
 and publishes them to PyPI with trusted publishing.

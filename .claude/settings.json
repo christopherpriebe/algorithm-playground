@@ -22,12 +22,23 @@
       "Bash(git show *)",
       "Bash(git blame *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git switch *)",
+      "Bash(git branch *)",
+      "Bash(git fetch *)",
+      "Bash(git pull --ff-only *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)"
     ],
     "ask": [
       "Bash(git push *)",
       "Bash(git tag *)",
       "Bash(git reset *)",
+      "Bash(git merge *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)",
       "Bash(uv publish *)"
     ],
     "deny": [

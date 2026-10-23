@@ -9,6 +9,9 @@ Feature: $ARGUMENTS
 You hold the judgment: the plan, the tests, the briefs, the review
 decisions. Implementation is delegated.
 
+0. Branch. Feature work lives on `dev-<slug>`, never on `dev` or `master`.
+   On `dev`: `git switch dev`, `git pull --ff-only` when a remote exists,
+   then `git switch -c dev-<slug>`. Already on a `dev-*` branch: stay.
 1. Plan. If a plan was agreed earlier in this conversation, use it.
    Otherwise produce the same sections as `/plan` inline and confirm open
    questions with the user before continuing.
@@ -30,7 +33,10 @@ decisions. Implementation is delegated.
 5. Gate. `uv run nox`, every default session including coverage. Summarize:
    what was built, what the tests cover, what the reviewer flagged, what is
    left open.
+6. Hand-off. Offer to commit on the branch and open a pull request against
+   `dev` (`gh pr create --base dev`), to be squash-merged. Do neither
+   without a yes.
 
 Never weaken a test to get green. Never add a dependency without saying so.
-Commit only if asked. If a step fails twice, stop and report instead of
+Commit only if asked, and only on the `dev-*` branch. If a step fails twice, stop and report instead of
 looping.

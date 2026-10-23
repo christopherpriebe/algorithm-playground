@@ -272,6 +272,14 @@ For a quick loop, `uv run pytest -m "not integration"` skips the end-to-end
 CLI tests, `uv run pytest -m integration` runs only them, and
 `uv run pytest -n0 --pdb` runs serially for debugging a failure.
 
+### Branches
+
+`master` holds releases only. `dev` accumulates feature pull requests, which
+are squash-merged. Feature work happens on `dev-<name>` branches cut from
+`dev`, and pull requests target `dev`. On GitHub, make `dev` the default
+branch so pull requests target it, allow only squash merges into it, and
+protect `master`.
+
 ### Working with Claude Code
 
 `CLAUDE.md` is the entry point: commands, the definition of done, and how work
@@ -290,17 +298,22 @@ merges later template changes.
 
 ## Releasing
 
+From `dev`, with a clean tree and nothing on `master` that `dev` lacks:
+
 ```console
 uv run nox -s bump -- minor
 uv run nox
 git commit -am "chore(release): v$(uv version --short)"
+git switch master && git merge --ff-only dev
 git tag -a "v$(uv version --short)" -m "v$(uv version --short)"
-git push --follow-tags
+git switch dev
+git push origin dev master --follow-tags
 ```
 
 The tag is annotated because `--follow-tags` pushes only annotated tags.
-Pushing it runs `.github/workflows/release.yml`, which publishes to PyPI
-through trusted publishing.
+Pushing it runs `.github/workflows/release.yml`, which checks that the tag is
+on `master` and matches the project version, then publishes to PyPI through
+trusted publishing. `/release` runs these steps.
 
 ## AI disclosure
 

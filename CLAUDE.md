@@ -20,7 +20,14 @@ Everything runs through uv. Never `pip`; never activate the venv by hand.
 - New behavior has a test that fails without it. Coverage stays at or above 90%.
 - Suppressions (`# noqa`, `# ty: ignore[...]`) carry a reason on the line and appear in your summary. `# type: ignore` is never used; the checker ignores it.
 - No new dependency without saying why.
-- No commit or push unless asked. Commits use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`; imperative subject under 72 characters; body says why) and the user's own git identity: no `Co-Authored-By` trailer, no AI attribution, never `--author`.
+- No commit or push unless asked, and never directly on `master` or `dev`. Commits use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`; imperative subject under 72 characters; body says why) and the user's own git identity: no `Co-Authored-By` trailer, no AI attribution, never `--author`.
+
+## Branches
+
+`master` holds releases only. `dev` accumulates feature PRs, squash-merged.
+Feature work happens on `dev-<slug>` branches cut from `dev`, and PRs target
+`dev`. A release is `dev` fast-forwarded into `master` plus an annotated tag
+(`/release`). Never merge `master` into anything but `dev`.
 
 ## Tests are the contract
 

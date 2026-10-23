@@ -19,6 +19,9 @@ in this session or another. Three parts of the harness carry it:
 
 ## Starting
 
+0. Branch: a marathon runs on `dev-<slug>`, cut from an up-to-date `dev`
+   (`git switch dev`, `git pull --ff-only` when a remote exists,
+   `git switch -c dev-<slug>`). Never on `dev` or `master`.
 1. The plan comes from the conversation: `/plan` output or the user's own
    list. Cut it into steps that each take well under an hour and end with
    `uv run nox` green. Keep it under 20 steps; split the run otherwise.
@@ -73,7 +76,9 @@ On "resume marathon <slug>", from the scheduled prompt or the user:
 ## Finishing
 
 Set `status: done`. Summarize what landed, with commit hashes, and anything
-skipped or left open.
+skipped or left open. Offer to open a pull request against `dev`
+(`gh pr create --base dev`), to be squash-merged; don't open it without a
+yes.
 
 ## Ledger format
 

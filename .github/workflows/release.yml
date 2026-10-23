@@ -18,7 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v10.3.0
+      - name: Tag is on master
+        if: github.ref_type == 'tag'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/master
       - name: Tag matches project version
         if: github.ref_type == 'tag'
         run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
