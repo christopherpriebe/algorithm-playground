@@ -11,6 +11,8 @@ paths:
 - `tests/` is organized by behavior, not by module: `test_parsing.py`,
   `test_cli.py`, never a file per `_module`. Internal refactors then touch no
   test. Shared fixtures live in `tests/conftest.py`.
+- Tests are functions, never classes. No `class Test...` grouping: related
+  tests share a file, a fixture, or a `parametrize`, not a class.
 - Names state the behavior: `test_parse_rejects_unknown_key`. No docstrings
   needed; `assert` and literal values are allowed here (`D`, `S101`,
   `PLR2004` are off under `tests/`).
