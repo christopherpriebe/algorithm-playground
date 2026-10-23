@@ -1,0 +1,238 @@
+[project]
+name = "algorithm-playground"
+version = "0.1.0"
+description = "A learning and benchmarking sandbox for algorithms, with a language-agnostic binary executable contract."
+readme = "README.md"
+authors = [{ name = "Christopher Priebe", email = "christophermpriebe@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Education",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Benchmark",
+    "Typing :: Typed",
+]
+dependencies = [
+    "typer>=0.19",
+    "rich>=13.7",
+    "plotext>=5.3,<6",
+    "typing-extensions>=4.12",
+]
+
+[project.scripts]
+algorithm-playground = "algorithm_playground.cli:app"
+
+[project.urls]
+Repository = "https://github.com/christopherpriebe/algorithm-playground"
+Documentation = "https://github.com/christopherpriebe/algorithm-playground/tree/master/docs"
+Issues = "https://github.com/christopherpriebe/algorithm-playground/issues"
+
+[dependency-groups]
+dev = [
+    { include-group = "lint" },
+    { include-group = "typecheck" },
+    { include-group = "test" },
+    { include-group = "docs" },
+    "pre-commit>=4.7",
+]
+lint = ["ruff>=0.17.1"]
+typecheck = [
+    "ty>=0.0.90",
+    "nox>=2026.10.20",
+    { include-group = "test" },
+    { include-group = "docs" },
+]
+test = [
+    "hypothesis>=6.120",
+    "pytest>=9.1",
+    "pytest-cov>=7.1",
+    "pytest-xdist>=3.8",
+]
+docs = [
+    "sphinx>=8.2",
+    "sphinx-rtd-theme>=3.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "algorithm_playground"
+
+[tool.uv]
+default-groups = ["dev"]
+
+# ------------------------------------------------------------------ ruff
+
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+extend-exclude = ["docs/_build"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+# Preview is limited to the rules listed by code below (pydoclint).
+preview = true
+explicit-preview-rules = true
+select = [
+    "A",     # flake8-builtins
+    "ANN",   # flake8-annotations
+    "ARG",   # flake8-unused-arguments
+    "ASYNC", # flake8-async
+    "B",     # flake8-bugbear
+    "BLE",   # flake8-blind-except
+    "C4",    # flake8-comprehensions
+    "D",     # pydocstyle
+    "DOC201", # pydoclint: return not documented
+    "DOC202", # pydoclint: return documented but function returns nothing
+    "DOC402", # pydoclint: yield not documented
+    "DOC403", # pydoclint: yield documented but function does not yield
+    "DOC501", # pydoclint: raised exception not documented
+    "DOC502", # pydoclint: documented exception is not raised
+    "DTZ",   # flake8-datetimez
+    "E",     # pycodestyle errors
+    "EM",    # flake8-errmsg
+    "ERA",   # eradicate (commented-out code)
+    "F",     # pyflakes
+    "FBT",   # flake8-boolean-trap
+    "FLY",   # flynt
+    "FURB",  # refurb
+    "G",     # flake8-logging-format
+    "I",     # isort
+    "ICN",   # flake8-import-conventions
+    "INP",   # flake8-no-pep420
+    "ISC",   # flake8-implicit-str-concat
+    "LOG",   # flake8-logging
+    "N",     # pep8-naming
+    "PERF",  # perflint
+    "PGH",   # pygrep-hooks
+    "PIE",   # flake8-pie
+    "PL",    # pylint
+    "PT",    # flake8-pytest-style
+    "PTH",   # flake8-use-pathlib
+    "PYI",   # flake8-pyi
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise
+    "RUF",   # ruff-specific
+    "S",     # flake8-bandit
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self
+    "SLOT",  # flake8-slots
+    "T10",   # flake8-debugger
+    "T20",   # flake8-print
+    "TID",   # flake8-tidy-imports
+    "TRY",   # tryceratops
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+    "YTT",   # flake8-2020
+]
+ignore = [
+    "D105",    # no docstrings on magic methods
+    "D107",    # no docstrings on __init__
+    "E501",    # line length is the formatter's job
+    "FBT003",  # boolean positional values in calls, e.g. dict.get(k, False)
+    "ISC001",  # conflicts with the formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D",       # test names document themselves
+    "DOC",
+    "INP001",  # tests are not a package (importlib import mode)
+    "PLR2004", # literal expected values are fine in tests
+    "S101",    # pytest uses assert
+]
+"docs/conf.py" = [
+    "A001",    # `copyright` is a Sphinx setting
+    "INP001",
+]
+"noxfile.py" = ["INP001"]
+"examples/**" = [
+    "INP001",  # standalone example scripts
+    "T201",    # examples report to the terminal
+]
+".claude/hooks/*.py" = [
+    "INP001",  # standalone hook scripts
+    "S603",    # subprocess with a fixed argv
+    "S607",    # tools resolved from PATH on purpose
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["algorithm_playground"]
+
+# -------------------------------------------------------------------- ty
+
+[tool.ty.src]
+include = ["src", "tests", "noxfile.py", "docs/conf.py", ".claude/hooks"]
+
+[tool.ty.rules]
+all = "error"
+
+[tool.ty.analysis]
+# Only `# ty: ignore[rule]` suppresses diagnostics.
+respect-type-ignore-comments = false
+
+[tool.ty.terminal]
+error-on-warning = true
+
+# ---------------------------------------------------------------- pytest
+
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["tests"]
+strict = true
+addopts = [
+    "-ra",
+    "--import-mode=importlib",
+    "--numprocesses=auto",
+    "--dist=worksteal",
+]
+filterwarnings = ["error"]
+# Shared test helpers are imported as the top-level `helpers` package.
+pythonpath = ["tests"]
+markers = [
+    "integration: end-to-end tests that invoke the CLI as a subprocess",
+]
+
+# -------------------------------------------------------------- coverage
+
+[tool.coverage.run]
+branch = true
+source_pkgs = ["algorithm_playground"]
+
+[tool.coverage.paths]
+source = ["src/algorithm_playground", "**/site-packages/algorithm_playground"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@overload",
+    "raise NotImplementedError",
+    'if __name__ == "__main__":',
+]
+
+[tool.coverage.html]
+directory = "htmlcov"

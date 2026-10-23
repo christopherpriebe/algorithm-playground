@@ -1,0 +1,864 @@
+"""Tests for the validation kit that checks a problem's hooks."""
+
+import importlib.util
+import random
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+
+from algorithm_playground.core import (
+    Dimension,
+    Fixture,
+    InputGenerator,
+    Problem,
+    Size,
+    VerificationResult,
+    assert_valid_problem,
+    validate_problem,
+)
+from algorithm_playground.problems.sorting import SortingProblem
+from helpers.inputs import AmbiguousValues, IdentityValues, UnequatableValues
+from helpers.scoring import NearSortingProblem
+from helpers.two_dimensions import (
+    Pair,
+    SimpleGraphProblem,
+    TwoDimensionProblem,
+    generate_pair,
+)
+
+
+def generate_values(random_generator: random.Random, size: int) -> list[int]:
+    """Generate ``size`` random values below ten."""
+    return [random_generator.randrange(10) for _ in range(size)]
+
+
+def build_sorting_variant(**members: object) -> SortingProblem:
+    """Build the (valid) sorting problem with the given members replaced."""
+    return type("Variant", (SortingProblem,), members)()
+
+
+class NoReaderSortingProblem(SortingProblem):
+    """The sorting problem without a way to read its inputs back."""
+
+    deserialize_input = Problem.deserialize_input
+
+
+def test_the_sorting_problem_has_no_findings() -> None:
+    """Test validating the sorting problem reports nothing."""
+    assert validate_problem(SortingProblem()) == []
+
+
+def test_the_sorting_problem_passes_the_assertion() -> None:
+    """Test asserting the sorting problem is valid does not raise."""
+    assert_valid_problem(SortingProblem())
+
+
+def test_the_distinct_count_example_is_valid(repository_root: Path) -> None:
+    """Test the distinct-count example problem passes validation."""
+    path = repository_root / "examples" / "distinct_count" / "distinct_count_problem.py"
+    specification = importlib.util.spec_from_file_location(
+        "distinct_count_for_test", path
+    )
+    assert specification is not None
+    assert specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+
+    assert_valid_problem(module.DistinctCountProblem())
+
+
+def test_assert_valid_problem_lists_every_finding() -> None:
+    """Test the assertion error names the problem and lists every finding."""
+
+    def provide_no_fixtures(_: SortingProblem) -> Iterator[Fixture[list[int]]]:
+        return iter(())
+
+    def provide_no_generators(_: SortingProblem) -> tuple[()]:
+        return ()
+
+    problem = build_sorting_variant(
+        fixtures=provide_no_fixtures, generators=provide_no_generators
+    )
+
+    with pytest.raises(
+        AssertionError, match=r"^Problem 'sorting' is not valid:"
+    ) as raised:
+        assert_valid_problem(problem)
+
+    message = str(raised.value)
+    assert "  - fixtures() returned no fixtures" in message
+    assert "  - generators() returned no generators" in message
+
+
+@pytest.mark.parametrize("attribute", ["name", "description"])
+def test_a_missing_name_or_description_is_reported(attribute: str) -> None:
+    """Test an empty name or description is a finding."""
+    problem = build_sorting_variant(**{attribute: ""})
+
+    findings = validate_problem(problem)
+
+    assert f"the class attribute '{attribute}' must be a non-empty string" in findings
+
+
+def test_fixture_names_must_be_unique() -> None:
+    """Test a fixture name used twice is a finding."""
+
+    def provide_repeated_fixtures(
+        _: SortingProblem,
+    ) -> Iterator[Fixture[list[int]]]:
+        yield Fixture("a", [])
+        yield Fixture("a", [1])
+
+    findings = validate_problem(
+        build_sorting_variant(fixtures=provide_repeated_fixtures)
+    )
+
+    assert "the fixture name 'a' is used more than once" in findings
+
+
+def test_fixtures_must_be_fixture_objects() -> None:
+    """Test a fixtures hook that yields something other than fixtures is a finding."""
+
+    def provide_tuples(_: SortingProblem) -> list[tuple[list[int], str]]:
+        return [([1], "x")]
+
+    findings = validate_problem(build_sorting_variant(fixtures=provide_tuples))
+
+    assert "fixtures() must yield Fixture objects, got tuple" in findings
+
+
+def test_a_fixture_that_does_not_serialize_is_named() -> None:
+    """Test a fixture whose input cannot be serialized is a finding that names the fixture."""
+
+    def provide_unserializable_fixture(
+        _: SortingProblem,
+    ) -> Iterator[Fixture[list[int]]]:
+        yield Fixture("huge", [2**40])
+
+    findings = validate_problem(
+        build_sorting_variant(fixtures=provide_unserializable_fixture)
+    )
+
+    assert any(
+        finding.startswith("fixture 'huge' does not serialize: ValueError")
+        for finding in findings
+    )
+
+
+def test_generator_names_must_be_unique() -> None:
+    """Test a generator name used twice is a finding."""
+
+    def provide_repeated_generators(
+        _: SortingProblem,
+    ) -> tuple[InputGenerator[list[int]], InputGenerator[list[int]]]:
+        return (
+            InputGenerator("same", description="one", generate=generate_values),
+            InputGenerator("same", description="two", generate=generate_values),
+        )
+
+    problem = build_sorting_variant(generators=provide_repeated_generators)
+
+    findings = validate_problem(problem)
+
+    assert "the generator name 'same' is used more than once" in findings
+
+
+def test_a_generator_must_be_deterministic_for_a_fixed_seed() -> None:
+    """Test a generator that ignores the seed is a finding."""
+
+    def generate_unseeded(_random_generator: random.Random, size: int) -> list[int]:
+        return [random.randrange(10**9)] * size  # noqa: S311  deliberately unseeded to test determinism detection
+
+    def provide_unseeded_generator(
+        _: SortingProblem,
+    ) -> tuple[InputGenerator[list[int]]]:
+        return (
+            InputGenerator(
+                "unseeded",
+                description="uses global randomness",
+                generate=generate_unseeded,
+            ),
+        )
+
+    problem = build_sorting_variant(generators=provide_unseeded_generator)
+
+    findings = validate_problem(problem)
+
+    assert (
+        "generator 'unseeded' at size=5 returned different inputs for the same seed"
+        in (findings)
+    )
+
+
+def test_a_generator_must_accept_size_zero() -> None:
+    """Test a generator that raises for size zero is a finding."""
+
+    def generate_unless_empty(random_generator: random.Random, size: int) -> list[int]:
+        if size == 0:
+            message = "size zero is not supported"
+            raise ValueError(message)
+        return generate_values(random_generator, size)
+
+    def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
+        return (InputGenerator("g", description="g", generate=generate_unless_empty),)
+
+    findings = validate_problem(build_sorting_variant(generators=provide_generator))
+
+    assert (
+        "generator 'g' at size=0 raised: ValueError: size zero is not supported"
+        in findings
+    )
+
+
+def test_an_expected_output_that_does_not_verify_is_reported() -> None:
+    """Test an expected output that the verifier rejects is a finding."""
+
+    def expect_descending_output(_: SortingProblem, input_data: list[int]) -> list[int]:
+        return sorted(input_data, reverse=True)
+
+    problem = build_sorting_variant(expected_output=expect_descending_output)
+
+    findings = validate_problem(problem)
+
+    assert any(
+        finding.startswith("verify() rejects expected_output() for fixture")
+        for finding in findings
+    )
+
+
+def test_an_input_output_frame_that_raises_is_reported() -> None:
+    """Test an input and output frame hook that raises is a finding that names the error."""
+
+    def explode(_: SortingProblem, _input_data: list[int], _output: list[int]) -> None:
+        message = "cannot draw"
+        raise RuntimeError(message)
+
+    findings = validate_problem(build_sorting_variant(input_output_frame=explode))
+
+    assert any(
+        finding.startswith("input_output_frame() raised for fixture")
+        and "cannot draw" in finding
+        for finding in findings
+    )
+
+
+def test_an_input_output_frame_that_is_not_a_frame_is_reported() -> None:
+    """Test an input and output frame hook that returns text is a finding."""
+
+    def draw_text(_: SortingProblem, _input_data: list[int], _output: list[int]) -> str:
+        return "a picture"
+
+    findings = validate_problem(build_sorting_variant(input_output_frame=draw_text))
+
+    assert "input_output_frame() must return a Frame or None, got str" in findings
+
+
+def test_no_expected_output_is_fine() -> None:
+    """Test a problem that cannot tell the expected output has no findings."""
+
+    def expect_nothing(_: SortingProblem, _input_data: list[int]) -> None:
+        return None
+
+    problem = build_sorting_variant(expected_output=expect_nothing)
+
+    assert validate_problem(problem) == []
+
+
+def test_shrink_candidates_must_serialize() -> None:
+    """Test a shrink candidate that cannot be serialized is a finding."""
+
+    def shrink_to_unserializable(
+        _: SortingProblem, _input_data: list[int]
+    ) -> Iterator[list[int]]:
+        return iter([[2**40]])
+
+    findings = validate_problem(build_sorting_variant(shrink=shrink_to_unserializable))
+
+    assert any("a shrink candidate of fixture" in finding for finding in findings)
+
+
+def test_a_shrink_hook_that_raises_is_reported() -> None:
+    """Test a shrink hook that raises is a finding that names the error."""
+
+    def shrink_by_raising(
+        _: SortingProblem, _input_data: list[int]
+    ) -> Iterator[list[int]]:
+        message = "no shrinking today"
+        raise RuntimeError(message)
+        yield []
+
+    findings = validate_problem(build_sorting_variant(shrink=shrink_by_raising))
+
+    assert any(
+        "shrink() raised for fixture" in finding and "no shrinking today" in finding
+        for finding in findings
+    )
+
+
+def test_describe_hooks_must_return_text() -> None:
+    """Test a description hook that returns a number is a finding."""
+
+    def describe_as_number(
+        _: SortingProblem,
+        _input_data: list[int],
+        *,
+        limit: int,  # noqa: ARG001  the validator calls the hook with this keyword
+    ) -> int:
+        return 5
+
+    problem = build_sorting_variant(describe_input=describe_as_number)
+
+    findings = validate_problem(problem)
+
+    assert "describe_input() must return text, got int" in findings
+
+
+def test_generators_are_sampled_from_the_minimum_size_up() -> None:
+    """Test generators are never asked for an input below the minimum size of the problem."""
+    sizes: list[int] = []
+
+    def generate_from_four(random_generator: random.Random, size: int) -> list[int]:
+        sizes.append(size)
+        if size < 4:
+            message = "needs four values"
+            raise ValueError(message)
+        return generate_values(random_generator, size)
+
+    def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
+        return (InputGenerator("g", description="g", generate=generate_from_four),)
+
+    problem = build_sorting_variant(
+        dimensions=(Dimension("size", minimum=4),),
+        debug_generator=None,
+        generators=provide_generator,
+    )
+
+    findings = validate_problem(problem)
+
+    assert findings == []
+    assert min(sizes) == 4
+
+
+def test_a_generator_that_fails_below_the_minimum_size_is_reported_there() -> None:
+    """Test a generator that cannot make small inputs is a finding at the failing size."""
+
+    def generate_from_four(_random_generator: random.Random, size: int) -> list[int]:
+        if size < 4:
+            message = "needs four values"
+            raise ValueError(message)
+        return [0] * size
+
+    def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
+        return (InputGenerator("g", description="g", generate=generate_from_four),)
+
+    findings = validate_problem(build_sorting_variant(generators=provide_generator))
+
+    assert "generator 'g' at size=0 raised: ValueError: needs four values" in findings
+
+
+@pytest.mark.parametrize(
+    "value",
+    [(), [Dimension("size")], ("size",)],
+    ids=["empty", "list", "not-dimensions"],
+)
+def test_the_dimensions_must_be_a_non_empty_tuple_of_dimensions(value: object) -> None:
+    """Test dimensions that are not a non-empty tuple of Dimension objects are a finding."""
+    findings = validate_problem(build_sorting_variant(dimensions=value))
+
+    assert any(
+        finding.startswith(
+            "the class attribute 'dimensions' must be a non-empty tuple of Dimension"
+        )
+        for finding in findings
+    )
+
+
+def test_dimension_names_must_be_unique() -> None:
+    """Test a dimension name used twice is a finding."""
+    problem = build_sorting_variant(dimensions=(Dimension("size"), Dimension("size")))
+
+    findings = validate_problem(problem)
+
+    assert "the dimension name 'size' is used more than once" in findings
+
+
+def test_the_growth_dimension_may_name_a_dimension() -> None:
+    """Test a growth dimension that names one of the dimensions has no findings."""
+    assert validate_problem(build_sorting_variant(growth_dimension="size")) == []
+
+
+def test_the_growth_dimension_must_name_a_dimension() -> None:
+    """Test a growth dimension that names no dimension is a finding."""
+    findings = validate_problem(build_sorting_variant(growth_dimension="nope"))
+
+    assert (
+        "growth_dimension 'nope' does not name one of the problem's dimensions"
+        in findings
+    )
+
+
+def test_a_problem_with_several_dimensions_is_valid() -> None:
+    """Test a problem with two dimensions passes validation."""
+    assert validate_problem(TwoDimensionProblem()) == []
+
+
+def test_a_generator_that_does_not_accept_the_dimensions_is_reported() -> None:
+    """Test a generator that takes a size where the problem has other dimensions is a finding."""
+
+    def generate_from_a_size(_random_generator: random.Random, size: int) -> Pair:
+        return (size, size)
+
+    def provide_generator(_: TwoDimensionProblem) -> tuple[InputGenerator[Pair]]:
+        return (InputGenerator("g", description="g", generate=generate_from_a_size),)
+
+    problem = type(
+        "Variant", (TwoDimensionProblem,), {"generators": provide_generator}
+    )()
+
+    findings = validate_problem(problem)
+
+    assert any(
+        finding.startswith("generator 'g' at vertices=1:edges=0 raised: TypeError")
+        for finding in findings
+    )
+
+
+def test_the_debug_generator_may_name_a_generator() -> None:
+    """Test a debug generator that names one of the generators has no findings."""
+    assert validate_problem(build_sorting_variant(debug_generator="sorted")) == []
+
+
+def test_the_debug_generator_must_name_a_generator() -> None:
+    """Test a debug generator that names no generator is a finding."""
+    findings = validate_problem(build_sorting_variant(debug_generator="nope"))
+
+    assert (
+        "debug_generator 'nope' does not name one of the problem's generators"
+        in findings
+    )
+
+
+@pytest.mark.parametrize(
+    "names",
+    [["list"], ("a", "a"), ("",), (3,)],
+    ids=["list", "duplicate", "empty-name", "not-text"],
+)
+def test_operation_names_must_be_unique_text_in_a_tuple(names: object) -> None:
+    """Test operation names that are not a tuple of unique, non-empty text are a finding."""
+    findings = validate_problem(build_sorting_variant(operation_names=names))
+
+    assert any(
+        finding.startswith("the class attribute 'operation_names' must be a tuple")
+        for finding in findings
+    )
+
+
+def test_a_shrink_candidate_equal_to_its_input_is_reported() -> None:
+    """Test a shrink candidate equal to the input is a finding."""
+
+    def shrink_to_copy(_: SortingProblem, input_data: list[int]) -> Iterator[list[int]]:
+        return iter([list(input_data)])
+
+    findings = validate_problem(build_sorting_variant(shrink=shrink_to_copy))
+
+    assert any(
+        finding.startswith("shrink() yields a candidate equal to its input for fixture")
+        for finding in findings
+    )
+
+
+def test_an_endless_shrink_hook_is_sampled_not_exhausted() -> None:
+    """Test a shrink hook that never stops is only sampled, so validation finishes."""
+
+    def shrink_endlessly(
+        _: SortingProblem, input_data: list[int]
+    ) -> Iterator[list[int]]:
+        while True:
+            yield [*input_data, 1]
+
+    assert validate_problem(build_sorting_variant(shrink=shrink_endlessly)) == []
+
+
+def test_a_hook_that_raises_does_not_stop_the_other_checks() -> None:
+    """Test the findings of the other hooks are still reported when one hook raises."""
+
+    def fail_to_provide_fixtures(
+        _: SortingProblem,
+    ) -> Iterator[Fixture[list[int]]]:
+        message = "fixtures exploded"
+        raise RuntimeError(message)
+        yield Fixture("never", [])
+
+    def provide_no_generators(_: SortingProblem) -> tuple[()]:
+        return ()
+
+    problem = build_sorting_variant(
+        fixtures=fail_to_provide_fixtures, generators=provide_no_generators
+    )
+
+    findings = validate_problem(problem)
+
+    assert "fixtures() raised: RuntimeError: fixtures exploded" in findings
+    assert (
+        "generators() returned no generators; provide at least one (the default)"
+        in findings
+    )
+
+
+def test_verify_is_not_asked_about_wrong_answers() -> None:
+    """Test the verifier is only shown outputs that are correctly sorted."""
+    outputs: list[list[int]] = []
+
+    def verify_and_record(
+        _: SortingProblem, _input_data: list[int], output: list[int]
+    ) -> VerificationResult:
+        outputs.append(output)
+        return VerificationResult(True)
+
+    validate_problem(build_sorting_variant(verify=verify_and_record))
+
+    assert all(output == sorted(output) for output in outputs)
+
+
+def test_a_fixture_that_breaks_the_rule_is_named() -> None:
+    """Test a fixture that the input rule rejects is a finding that names the fixture."""
+
+    def reject_more_than_one_value(
+        _: SortingProblem, input_data: list[int]
+    ) -> str | None:
+        return "must have at most one value" if len(input_data) > 1 else None
+
+    findings = validate_problem(
+        build_sorting_variant(check_input=reject_more_than_one_value)
+    )
+
+    assert any(
+        finding.startswith(
+            "check_input() rejects fixture 'duplicates': must have at most"
+        )
+        for finding in findings
+    )
+
+
+def test_a_generated_sample_that_breaks_the_rule_is_named() -> None:
+    """Test a generated input that the input rule rejects is a finding that names the case."""
+
+    def reject_empty_input(_: SortingProblem, input_data: list[int]) -> str | None:
+        return "must not be empty" if not input_data else None
+
+    findings = validate_problem(build_sorting_variant(check_input=reject_empty_input))
+
+    assert (
+        "check_input() rejects generator 'uniform' at size=0: must not be empty"
+        in findings
+    )
+    assert "check_input() rejects fixture 'empty': must not be empty" in findings
+
+
+def test_a_rule_that_raises_is_named() -> None:
+    """Test an input rule that raises is a finding that names the error."""
+
+    def explode(_: SortingProblem, _input_data: list[int]) -> str | None:
+        message = "check exploded"
+        raise RuntimeError(message)
+
+    findings = validate_problem(build_sorting_variant(check_input=explode))
+
+    assert any(
+        finding.startswith(
+            "check_input() raised for fixture 'empty': RuntimeError: check ex"
+        )
+        for finding in findings
+    )
+
+
+def test_a_rule_must_return_text_or_none() -> None:
+    """Test an input rule that returns a boolean is a finding."""
+
+    def return_false(_: SortingProblem, _input_data: list[int]) -> bool:
+        return False
+
+    findings = validate_problem(build_sorting_variant(check_input=return_false))
+
+    assert "check_input() must return text or None, got bool" in findings
+
+
+def test_shrink_candidates_the_rule_rejects_are_not_findings() -> None:
+    """Test shrink candidates that the input rule rejects are never serialized or reported."""
+
+    def require_three_values(_: SortingProblem, input_data: list[int]) -> str | None:
+        return None if len(input_data) >= 3 or not input_data else "needs three values"
+
+    # Candidates of fewer values would not serialize, but the shrinker never runs them.
+    def shrink_to_unserializable(
+        _: SortingProblem, _input_data: list[int]
+    ) -> Iterator[list[int]]:
+        yield [2**40]
+        yield [2**40, 1]
+
+    problem = build_sorting_variant(
+        check_input=require_three_values, shrink=shrink_to_unserializable
+    )
+
+    findings = validate_problem(problem)
+
+    assert not any("shrink candidate" in finding for finding in findings)
+
+
+def test_shrink_candidates_the_rule_accepts_must_still_serialize() -> None:
+    """Test a shrink candidate the input rule accepts but that cannot serialize is a finding."""
+
+    def shrink_to_unserializable(
+        _: SortingProblem, _input_data: list[int]
+    ) -> Iterator[list[int]]:
+        yield [2**40]
+
+    findings = validate_problem(build_sorting_variant(shrink=shrink_to_unserializable))
+
+    assert any(
+        "a shrink candidate of" in finding and "does not serialize" in finding
+        for finding in findings
+    )
+
+
+def test_a_problem_that_reads_back_what_it_wrote_is_valid() -> None:
+    """Test a problem whose reader returns what its writer wrote has no findings."""
+    assert validate_problem(SortingProblem()) == []
+
+
+def test_an_input_that_comes_back_different_is_named() -> None:
+    """Test a reader that returns another input is a finding that names the fixture."""
+
+    def read_empty_input(_: SortingProblem, _path: Path) -> list[int]:
+        return []
+
+    findings = validate_problem(
+        build_sorting_variant(deserialize_input=read_empty_input)
+    )
+
+    assert any(
+        finding.startswith(
+            "deserialize_input() does not return the input that serialize_input wrote for fixture"
+        )
+        for finding in findings
+    )
+
+
+def test_a_reader_that_raises_is_named() -> None:
+    """Test a reader that raises is a finding that names the error."""
+
+    def fail_to_read(_: SortingProblem, _path: Path) -> list[int]:
+        message = "disk gone"
+        raise OSError(message)
+
+    findings = validate_problem(build_sorting_variant(deserialize_input=fail_to_read))
+
+    assert any(
+        finding.startswith(
+            "deserialize_input() raised for fixture 'empty': OSError: disk gone"
+        )
+        for finding in findings
+    )
+
+
+def test_a_problem_without_a_reader_is_not_asked_for_one() -> None:
+    """Test a problem that cannot read its inputs is not reported for it."""
+    assert validate_problem(NoReaderSortingProblem()) == []
+
+
+def test_a_scoring_problem_is_valid() -> None:
+    """Test a problem whose verifier scores every output passes validation."""
+    assert validate_problem(NearSortingProblem()) == []
+
+
+@pytest.mark.parametrize("value", ["", 3], ids=["empty", "number"])
+def test_the_score_name_must_be_text_or_none(value: object) -> None:
+    """Test a score name that is not non-empty text is a finding."""
+    findings = validate_problem(build_sorting_variant(score_name=value))
+
+    assert any(
+        finding.startswith("the class attribute 'score_name' must be")
+        for finding in findings
+    )
+
+
+def test_a_score_without_a_name_is_reported() -> None:
+    """Test a verifier that scores while the problem declares no score name is a finding."""
+
+    def verify_with_a_score(
+        _: SortingProblem, _input_data: list[int], _output: list[int]
+    ) -> VerificationResult:
+        return VerificationResult(True, score=1.0)
+
+    findings = validate_problem(build_sorting_variant(verify=verify_with_a_score))
+
+    assert any(
+        finding.startswith("verify() returned a score for fixture")
+        and "declares no score_name" in finding
+        for finding in findings
+    )
+
+
+def test_a_named_score_that_the_verifier_does_not_give_is_reported() -> None:
+    """Test a problem that names a score its verifier never gives is a finding."""
+    findings = validate_problem(build_sorting_variant(score_name="inversions"))
+
+    assert any(
+        finding.startswith("verify() returned no score for fixture")
+        and "'inversions'" in finding
+        for finding in findings
+    )
+
+
+def build_simple_graph_variant(**members: object) -> SimpleGraphProblem:
+    """Build the (valid) coupled-dimension problem with the given members replaced."""
+    return type("Variant", (SimpleGraphProblem,), members)()
+
+
+def test_a_problem_with_coupled_dimensions_is_valid() -> None:
+    """Test a problem whose rule couples its dimensions passes validation."""
+    assert validate_problem(SimpleGraphProblem()) == []
+
+
+def test_a_size_check_that_rejects_the_minimum_size_is_reported() -> None:
+    """Test a size check that rejects the minimum size is a finding with the reason."""
+
+    def reject_no_edges(_: SimpleGraphProblem, size: Size) -> str | None:
+        return "an edge is needed" if size["edges"] == 0 else None
+
+    findings = validate_problem(build_simple_graph_variant(check_size=reject_no_edges))
+
+    assert (
+        "check_size() rejects the minimum size vertices=1:edges=0: an edge is needed"
+        in findings
+    )
+
+
+def test_a_size_check_must_return_text_or_none() -> None:
+    """Test a size check that returns a boolean is a finding."""
+    problem = build_simple_graph_variant(check_size=lambda _self, _size: False)
+
+    findings = validate_problem(problem)
+
+    assert "check_size() must return text or None, got bool" in findings
+
+
+def test_a_size_check_that_raises_is_reported() -> None:
+    """Test a size check that raises is a finding that names the error."""
+
+    def explode(_: SimpleGraphProblem, _size: Size) -> str | None:
+        message = "size check exploded"
+        raise RuntimeError(message)
+
+    findings = validate_problem(build_simple_graph_variant(check_size=explode))
+
+    assert any(
+        finding.startswith("check_size() raised for")
+        and "RuntimeError: size check exploded" in finding
+        for finding in findings
+    )
+
+
+def test_generators_are_not_sampled_at_sizes_the_problem_rejects() -> None:
+    """Test validation samples a generator only at sizes the problem's rule accepts."""
+    sampled: list[Pair] = []
+
+    def record_pair(
+        random_generator: random.Random, *, vertices: int, edges: int
+    ) -> Pair:
+        sampled.append((vertices, edges))
+        return generate_pair(random_generator, vertices=vertices, edges=edges)
+
+    def reject_small_graphs_with_edges(_: SimpleGraphProblem, size: Size) -> str | None:
+        if size["edges"] > 0 and size["vertices"] < 10:
+            return "a graph with fewer than ten vertices has no edges here"
+        return None
+
+    def provide_generator(_: SimpleGraphProblem) -> tuple[InputGenerator[Pair]]:
+        return (
+            InputGenerator("recording", description="records", generate=record_pair),
+        )
+
+    problem = build_simple_graph_variant(
+        check_size=reject_small_graphs_with_edges, generators=provide_generator
+    )
+
+    findings = validate_problem(problem)
+
+    assert findings == []
+    assert sampled
+    assert all(edges == 0 or vertices >= 10 for vertices, edges in sampled)
+
+
+def test_a_size_check_that_raises_at_larger_sizes_is_reported() -> None:
+    """Test a size check that accepts the minimum but raises elsewhere is still a finding."""
+
+    def explode_beyond_one_vertex(_: SimpleGraphProblem, size: Size) -> str | None:
+        if size["vertices"] > 1:
+            message = "size check exploded"
+            raise RuntimeError(message)
+        return None
+
+    findings = validate_problem(
+        build_simple_graph_variant(check_size=explode_beyond_one_vertex)
+    )
+
+    assert any(
+        finding.startswith("check_size() raised for")
+        and "RuntimeError: size check exploded" in finding
+        for finding in findings
+    )
+
+
+def build_problem_with_input_type(
+    input_type: type[list[int]],
+) -> SortingProblem:
+    """Build the sorting problem whose fixtures and generator produce inputs of a given type."""
+
+    def provide_fixtures(_: SortingProblem) -> Iterator[Fixture[list[int]]]:
+        yield Fixture("pair", input_type([2, 1]))
+
+    def generate_typed(random_generator: random.Random, size: int) -> list[int]:
+        return input_type(generate_values(random_generator, size))
+
+    def provide_generator(_: SortingProblem) -> tuple[InputGenerator[list[int]]]:
+        return (InputGenerator("typed", description="typed", generate=generate_typed),)
+
+    return build_sorting_variant(
+        fixtures=provide_fixtures, generators=provide_generator, debug_generator=None
+    )
+
+
+def test_an_input_whose_equality_raises_is_a_finding_not_a_crash() -> None:
+    """Test an input type whose comparison raises gives findings naming it, never a traceback."""
+    findings = validate_problem(build_problem_with_input_type(UnequatableValues))
+
+    assert findings
+    assert all("Traceback" not in finding for finding in findings)
+    assert any(
+        finding.startswith("comparing") and "TypeError: no equality here" in finding
+        for finding in findings
+    )
+
+
+def test_an_input_type_with_identity_equality_is_reported_as_nondeterministic() -> None:
+    """Test an input type equal only to itself is reported as a generator that is not deterministic."""
+    findings = validate_problem(build_problem_with_input_type(IdentityValues))
+
+    assert (
+        "generator 'typed' at size=0 returned different inputs for the same seed"
+        in findings
+    )
+
+
+def test_an_input_whose_comparison_cannot_be_judged_is_a_finding_not_a_crash() -> None:
+    """Test an input type whose comparison is neither true nor false gives a finding."""
+    findings = validate_problem(build_problem_with_input_type(AmbiguousValues))
+
+    assert findings
+    assert any(
+        finding.startswith("comparing")
+        and "ValueError: the truth value of a comparison is ambiguous" in finding
+        for finding in findings
+    )

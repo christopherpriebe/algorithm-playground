@@ -1,0 +1,8 @@
+# Run from this directory: algorithm-playground test distinct-count
+python_paths = ["."]
+problem_modules = ["distinct_count_problem"]
+
+[[implementations]]
+name = "python-set"
+problem = "distinct-count"
+command = "python3 distinct_count.py"

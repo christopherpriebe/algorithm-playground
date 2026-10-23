@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier; do not edit manually.
+_commit: deef425
+_src_path: gh:christopherpriebe/python-package-template
+author_email: christophermpriebe@gmail.com
+author_name: Christopher Priebe
+copyright_year: '2026'
+description: A learning and benchmarking sandbox for algorithms, with a language-agnostic
+    binary executable contract.
+github_owner: christopherpriebe
+license: MIT
+package_name: algorithm_playground
+project_name: algorithm-playground
+project_slug: algorithm-playground
+python_min: '3.11'
+use_rust: false
